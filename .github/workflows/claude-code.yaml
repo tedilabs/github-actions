@@ -1,0 +1,70 @@
+name: Claude Code
+
+on:
+  workflow_call:
+    # inputs:
+    #   test:Hey Austin! Hey Austin!
+    #     type: boolean
+    #     required: false
+    #     default: true
+    #     description: "(Optional) Whether to "
+
+    secrets:
+      claude_code_oauth_token:
+        required: true
+        description: "(Required) The OAuth token for Claude Code Action. This is required to authenticate with the Claude API."
+
+jobs:
+  claude-code-action:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Run Claude PR Action
+      id: claude-code
+      uses: anthropics/claude-code-action@beta
+      with:
+        claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+        timeout_minutes: "30"
+        max_turns: "16"
+        mode: tag
+        trigger_phrase: "@claude"
+        # Restrict network access to specific domains only
+        experimental_allowed_domains: |
+          .anthropic.com
+          .github.com
+          api.github.com
+          .githubusercontent.com
+          bun.sh
+          registry.npmjs.org
+          .blob.core.windows.net
+          docs.aws.amazon.com
+          registry.terraform.io
+          developer.hashicorp.com
+        mcp_config: |
+          {
+            "mcpServers": {
+              "sequential-thinking": {
+                "command": "npx",
+                "args": [
+                  "-y",
+                  "@modelcontextprotocol/server-sequential-thinking"
+                ]
+              },
+              "terraform": {
+                "command": "docker",
+                "args": [
+                  "run",
+                  "-i",
+                  "--rm",
+                  "hashicorp/terraform-mcp-server"
+                ]
+              }
+            }
+          }
+        allowed_tools: "mcp__sequential-thinking__sequentialthinking"
