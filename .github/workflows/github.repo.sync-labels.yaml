@@ -1,0 +1,42 @@
+name: GitHub Repo - Sync Labels
+
+
+on:
+  workflow_call:
+    inputs:
+      config_file:
+        type: string
+        required: false
+        default: ".github/labels.yaml"
+        description: "(Optional) The path to the `sync-labels` config file. Defaults to `.github/labels.yaml`."
+
+      exclude_labels:
+        type: string
+        required: false
+        default: ""
+        description: "(Optional) Newline-delimited list of labels pattern(s)/matcher to exclude."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+
+jobs:
+  sync-labels:
+    name: Sync labels to the GitHub Repository
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v4
+
+    - name: Sync Labels
+      id: sync-labels
+      uses: crazy-max/ghaction-github-labeler@v5
+      with:
+        github-token: ${{ secrets.token }}
+        yaml-file: ${{ inputs.config_file }}
+        dry-run: ${{ github.event_name == 'pull_request' }}
+        exclude: ${{ inputs.exclude_labels }}

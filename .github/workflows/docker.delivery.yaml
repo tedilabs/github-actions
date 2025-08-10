@@ -1,0 +1,253 @@
+name: Docker - Delivery
+
+
+on:
+  workflow_call:
+    inputs:
+      qemu_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to install QEMU static binaries. Defaults to `true`."
+      qemu_platforms:
+        type: string
+        required: false
+        default: all
+        description: "(Optional) A set of additional platforms to install with QEMU. Defaults to `all`."
+      buildx_version:
+        type: string
+        required: false
+        description: "(Optional) The version of Buildx to install. (eg. v0.3.0)"
+      buildx_driver:
+        type: string
+        required: false
+        default: docker-container
+        description: "(Optional) The builder driver to be used. Defaults to `docker-container`."
+      buildx_platforms:
+        type: string
+        required: false
+        description: "(Optional) A set of platforms supported by the node. It expects a comma-separated list of platforms of the form `OS/architecture/variant`. The node will also automatically detect the platforms it supports, but manual values take priority over the detected ones and can be used when multiple nodes support building for the same platform."
+      build_context:
+        type: string
+        required: false
+        description: "(Optional) Build's context is the set of files located in the specified PATH or URL. Defaults to Git context."
+      build_dockerfile:
+        type: string
+        required: false
+        description: "(Optional) The path to the `Dockerfile`. Defaults to `{context}/Dockerfile)`."
+      build_target:
+        type: string
+        required: false
+        description: "(Optional) The target stage to build."
+      build_platforms:
+        type: string
+        required: false
+        default: linux/amd64,linux/arm64"
+        description: "(Optional) A set of target platforms to build. It expects a comma-separated list of platforms of the form `OS/architecture/variant`. Defaults to `linux/amd64,linux/arm64`."
+      build_args:
+        type: string
+        required: false
+        description: "(Optional) A list of build-time variables."
+      prebuild_commands:
+        type: string
+        required: false
+        description: "(Optional) A list of commands to run before the image build."
+      image_flavor:
+        type: string
+        required: false
+        default: |
+          latest=auto
+        description: "(Optional) The flavor option for `docker/metadata-action` action to define a global behavior for `image_tags` input. Defaults to `latest=auto`."
+      image_name:
+        type: string
+        required: true
+        description: "(Required) The image name to generate."
+      image_tags:
+        type: string
+        required: false
+        default: |
+          type=sha,format=short,prefix=
+          type=ref,event=branch
+          type=ref,event=tag
+          type=ref,event=pr
+          type=semver,pattern=v{{ version }}
+          type=semver,pattern=v{{ major }}.{{ minor }}
+          type=semver,pattern=v{{ major }}
+        description: "(Optional) The tags option for `docker/metadata-action` action to easily generate image tags. a key-value pair list in CSV format to remove limitations intrinsically linked to GitHub Actions."
+      push_image:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether to push the generated container image to the remote registry. Defaults to `false`."
+      aws_ecr_account_id:
+        type: string
+        required: false
+        description: "(Optional) The AWS account ID used to log against the AWS ECR."
+      aws_ecr_region:
+        type: string
+        required: false
+        description: "(Optional) The region of the AWS ECR."
+      aws_github_oidc_audience:
+        type: string
+        required: false
+        default: sts.amazonaws.com
+        description: "(Optional) The OIDC audience to be specified when the JWT is created. Defaults to `sts.amazonaws.com`. This will work for most cases. Changing the default audience may be necessary when using non-default AWS partitions, such as China regions."
+      aws_github_oidc_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+
+    secrets:
+      dockerhub_username:
+        required: false
+        description: "(Optional) The username used to log against the Docker Hub."
+      dockerhub_token:
+        required: false
+        description: "(Optional) The personal access token used to log against the Docker Hub."
+      aws_access_key_id:
+        required: false
+        description: "(Optional) The access key ID used to authenticate to the AWS ECR."
+      aws_secret_access_key:
+        required: false
+        description: "(Optional) The secret access key used to authenticate to the AWS ECR."
+      aws_github_oidc_iam_role:
+        required: false
+        description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate to the AWS ECR."
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+    outputs:
+      builder_name:
+        value: ${{ jobs.delivery.outputs.builder_name }}
+        description: "The builder name of Buildx."
+      builder_driver:
+        value: ${{ jobs.delivery.outputs.builder_driver }}
+        description: "The builder driver of Buildx."
+      builder_platforms:
+        value: ${{ jobs.delivery.outputs.builder_platforms }}
+        description: "A set of builder node platforms which are preferred or available."
+      builder_nodes:
+        value: ${{ jobs.delivery.outputs.builder_nodes }}
+        description: "A set of metadata of builder nodes."
+      image_version:
+        value: ${{ jobs.delivery.outputs.image_version }}
+        description: "A version of the generated container image."
+      image_tags:
+        value: ${{ jobs.delivery.outputs.image_tags }}
+        description: "A set of tags of the generated container image."
+      image_labels:
+        value: ${{ jobs.delivery.outputs.image_labels }}
+        description: "A pairs of labels of the generated container image."
+      image_annotations:
+        value: ${{ jobs.delivery.outputs.image_annotations }}
+        description: "A pairs of annotations of the generated container image."
+      image_id:
+        value: ${{ jobs.delivery.outputs.image_id }}
+      image_digest:
+        value: ${{ jobs.delivery.outputs.image_digest }}
+      image_build_metadata:
+        value: ${{ jobs.delivery.outputs.image_build_metadata }}
+
+
+jobs:
+  delivery:
+    name: Build and Push Docker Container Image to the Repository
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKERHUB_ENABLED: ${{ secrets.dockerhub_username != '' && secrets.dockerhub_token != '' }}
+      AWS_ECR_ENABLED: ${{ inputs.aws_ecr_account_id != '' && inputs.aws_ecr_region != '' }}
+      AWS_ECR_REGISTRY: ${{ (inputs.aws_ecr_account_id != '' && inputs.aws_ecr_region != '') && format('{0}.dkr.ecr.{1}.amazonaws.com', inputs.aws_ecr_account_id, inputs.aws_ecr_region) || '' }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      id: setup-qemu
+      uses: docker/setup-qemu-action@v3
+      if: ${{ inputs.qemu_enabled }}
+      with:
+        platforms: ${{ inputs.qemu_platforms }}
+
+    - name: Set up Docker Buildx
+      id: docker-buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        version: ${{ inputs.buildx_version }}
+        driver: ${{ inputs.buildx_driver }}
+        platforms: ${{ inputs.buildx_platforms }}
+
+    - name: Login to Container Registry (Docker Hub)
+      id: docker-login-dockerhub
+      uses: docker/login-action@v3
+      if: ${{ env.DOCKERHUB_ENABLED == 'true' }}
+      with:
+        username: ${{ secrets.dockerhub_username }}
+        password: ${{ secrets.dockerhub_token }}
+
+    - name: Configure AWS Credentials
+      id: configure-aws-credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      if: ${{ env.AWS_ECR_ENABLED == 'true' }}
+      with:
+        aws-region: ${{ inputs.aws_ecr_region }}
+        aws-access-key-id: ${{ secrets.aws_access_key_id }}
+        aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+        role-to-assume: ${{ secrets.aws_github_oidc_iam_role }}
+        role-session-name: ${{ inputs.aws_github_oidc_session_name }}
+        audience: ${{ inputs.aws_github_oidc_audience }}
+        mask-aws-account-id: true
+
+    - name: Login to Container Registry (AWS ECR)
+      id: docker-login-aws-ecr
+      uses: docker/login-action@v3
+      if: ${{ env.AWS_ECR_ENABLED == 'true' }}
+      with:
+        registry: ${{ env.AWS_ECR_REGISTRY }}
+
+    - name: Prepare metadata for Container Image
+      id: docker-metadata
+      uses: docker/metadata-action@v5
+      with:
+        context: workflow
+        images: |
+          name=${{ secrets.dockerhub_username }}/${{ inputs.image_name }},enable=${{ env.DOCKERHUB_ENABLED }}
+          name=${{ env.AWS_ECR_REGISTRY }}/${{ inputs.image_name }},enable=${{ env.AWS_ECR_ENABLED }}
+        flavor: ${{ inputs.image_flavor }}
+        tags: ${{ inputs.image_tags }}
+
+    - name: Run command before Image Build
+      id: docker-pre-build
+      run: ${{ inputs.prebuild_commands }}
+      if: ${{ inputs.prebuild_commands != '' }}
+
+    - name: Build, tag, and push image to Container Registry
+      id: docker-build-push
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ inputs.build_context }}
+        file: ${{ inputs.build_dockerfile }}
+        target: ${{ inputs.build_target }}
+        platforms: ${{ inputs.build_platforms }}
+        build-args: ${{ inputs.build_args }}
+        push: ${{ inputs.push_image }}
+        tags: ${{ steps.docker-metadata.outputs.tags }}
+        labels: ${{ steps.docker-metadata.outputs.labels }}
+        annotations: ${{ steps.docker-metadata.outputs.annotations }}
+        github-token: ${{ secrets.token || github.token }}
+
+    outputs:
+      builder_name: ${{ steps.docker-buildx.outputs.name }}
+      builder_driver: ${{ steps.docker-buildx.outputs.driver }}
+      builder_platforms: ${{ steps.docker-buildx.outputs.platforms }}
+      builder_nodes: ${{ steps.docker-buildx.outputs.nodes }}
+      image_version: ${{ steps.docker-metadata.outputs.version }}
+      image_tags: ${{ steps.docker-metadata.outputs.tags }}
+      image_labels: ${{ steps.docker-metadata.outputs.labels }}
+      image_annotations: ${{ steps.docker-metadata.outputs.annotations }}
+      image_id: ${{ steps.docker-build-push.outputs.imageid }}
+      image_digest: ${{ steps.docker-build-push.outputs.digest }}
+      image_build_metadata: ${{ steps.docker-build-push.outputs.metadata }}

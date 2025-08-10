@@ -1,0 +1,30 @@
+name: GitHub PR - Auto Assign
+
+
+on:
+  workflow_call:
+    inputs:
+      config_file:
+        type: string
+        required: false
+        default: ".github/auto-assign.yaml"
+        description: "(Optional) The path to the `auto-assign` config file. Defaults to `.github/auto-assign.yaml`."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+
+jobs:
+  auto-assign:
+    name: Add reviewers and assignees to the Pull Request
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Add Reviewers and Assignees
+      id: auto-assign
+      uses: kentaro-m/auto-assign-action@v2.0.0
+      with:
+        configuration-path: ${{ inputs.config_file }}
+        repo-token: ${{ secrets.token }}

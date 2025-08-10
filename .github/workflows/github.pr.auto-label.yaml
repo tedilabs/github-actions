@@ -1,0 +1,143 @@
+name: GitHub PR - Auto Label
+
+
+on:
+  workflow_call:
+    inputs:
+      labeler_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether enabled `labeler`. Defaults to `true`."
+      labeler_config_file:
+        type: string
+        required: false
+        default: ".github/labeler.yaml"
+        description: "(Optional) The path to the `labeler` config file. Defaults to `.github/labeler.yaml`."
+      labeler_sync_labels:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether or not to remove labels when matching files are reverted or no longer changed by the PR. Defaults to `true`."
+      labeler_dot_included:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to auto-include paths starting with dot (e.g. `.github`). Defaults to `true`."
+      labeler_pr_numbers:
+        type: string
+        required: false
+        description: "(Optional) The number(s) of pull request to update, rather than detecting from the workflow context. In normal usage, the pr-number input is not required as the action will detect the PR number from the workflow context."
+      pr_size_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether enabled `pr-size-labeler`. Defaults to `true`."
+      pr_size_xs_label:
+        type: string
+        required: false
+        default: "size/XS"
+        description: "(Optional) A label for very small-sized PRs. Defaults to `size/XS`."
+      pr_size_xs_max:
+        type: number
+        required: false
+        default: 15
+        description: "(Optional) Maximum number of changes allowed for XS-sized PRs. Defaults to `15`."
+      pr_size_s_label:
+        type: string
+        required: false
+        default: "size/S"
+        description: "(Optional) A label for small-sized PRs. Defaults to `size/S`."
+      pr_size_s_max:
+        type: number
+        required: false
+        default: 100
+        description: "(Optional) Maximum number of changes allowed for S-sized PRs. Defaults to `100`."
+      pr_size_m_label:
+        type: string
+        required: false
+        default: "size/M"
+        description: "(Optional) A label for medium-sized PRs. Defaults to `size/M`."
+      pr_size_m_max:
+        type: number
+        required: false
+        default: 500
+        description: "(Optional) Maximum number of changes allowed for M-sized PRs. Defaults to `500`."
+      pr_size_l_label:
+        type: string
+        required: false
+        default: "size/L"
+        description: "(Optional) A label for large-sized PRs. Defaults to `size/L`."
+      pr_size_l_max:
+        type: number
+        required: false
+        default: 1000
+        description: "(Optional) Maximum number of changes allowed for L-sized PRs. Defaults to `1000`."
+      pr_size_xl_label:
+        type: string
+        required: false
+        default: "size/XL"
+        description: "(Optional) A label for extra large-sized PRs. A PR will be labeled it if it exceeds the amount of changes defined in `pr_size_l_max`. Defaults to `size/XL`."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+    outputs:
+      labeler_new_labels:
+        value: ${{ jobs.labeler.outputs.new_labels }}
+        description: "A comma-separated list of all new labels."
+      labeler_all_labels:
+        value: ${{ jobs.labeler.outputs.all_labels }}
+        description: "A comma-separated list of all labels that the PR contains."
+
+
+jobs:
+  labeler:
+    name: Add labels by Labeler
+    runs-on: ubuntu-latest
+    if: ${{ inputs.labeler_enabled }}
+
+    steps:
+    - name: Add Labels by Labeler
+      id: auto-label
+      uses: actions/labeler@v5
+      with:
+        repo-token: ${{ secrets.token }}
+        configuration-path: ${{ inputs.labeler_config_file }}
+        sync-labels: ${{ inputs.labeler_sync_labels }}
+        dot: ${{ inputs.labeler_dot_included }}
+        pr-number: ${{ inputs.labeler_pr_numbers }}
+
+    outputs:
+      new_labels: ${{ steps.auto-label.outputs.new-labels }}
+      all_labels: ${{ steps.auto-label.outputs.all-labels }}
+
+
+  pr-size-labeler:
+    name: Add labels by PR Size Labeler
+    runs-on: ubuntu-latest
+    if: ${{ inputs.pr_size_enabled }}
+
+    steps:
+    - name: Add PR Size Labels for PR
+      uses: codelytv/pr-size-labeler@v1
+      with:
+        GITHUB_TOKEN: ${{ secrets.token }}
+        xs_label: ${{ inputs.pr_size_xs_label }}
+        xs_max_size: ${{ inputs.pr_size_xs_max }}
+        s_label: ${{ inputs.pr_size_s_label }}
+        s_max_size: ${{ inputs.pr_size_s_max }}
+        m_label: ${{ inputs.pr_size_m_label }}
+        m_max_size: ${{ inputs.pr_size_m_max }}
+        l_label: ${{ inputs.pr_size_l_label }}
+        l_max_size: ${{ inputs.pr_size_l_max }}
+        xl_label: ${{ inputs.pr_size_xl_label }}
+        fail_if_xl: 'false'
+        message_if_xl: >
+          'This PR has too many changes.
+          Please make sure you are NOT addressing multiple issues with one PR.'
+        ignore_line_deletions: 'false'
+        ignore_file_deletions: 'true'
+
