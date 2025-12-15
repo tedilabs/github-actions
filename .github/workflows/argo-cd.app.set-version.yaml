@@ -1,0 +1,116 @@
+name: ArgoCD App - Set Version
+
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        type: string
+        required: true
+        description: ""
+      app_version:
+        type: string
+        required: true
+        description: ""
+      app_dir:
+        type: string
+        required: true
+        description: ""
+      app_url:
+        type: string
+        required: true
+        description: ""
+      environment:
+        type: string
+        required: true
+        description: ""
+      # kube_cluster:
+      #   type: string
+      #   required: true
+      #   description: "(Required) The Kubernetes cluster name of the target ArgoCD application. Valid values are `apne1-mars` and `apne1-terra`."
+      argocd_repository:
+        type: string
+        required: false
+        default: tedilabs/k8s-manifests
+        description: "(Optional) A full name of the GitHub repository for ArgoCD application source. Defaults to `tedilabs/k8s-manifests`."
+      git_user_name:
+        type: string
+        required: false
+        default: GitHub Actions
+        description: "(Optional) The Git username to use when creating Git commit for application version change. Defaults to `GitHub Actions`."
+      git_user_email:
+        type: string
+        required: false
+        default: bot@tedilabs.com
+        description: "(Optional) The Git user email to use when creating Git commit for application version change. Defaults to `bot@tedilabs.com`."
+      git_commit_message:
+        type: string
+        required: false
+        description: "(Optional) The Git commit message to use when creating Git commit for application version change."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+      deploy_key:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+    # outputs:
+    #   image_id:
+    #     value: ${{ jobs.delivery.outputs.image_id }}
+    #   image_digest:
+    #     value: ${{ jobs.delivery.outputs.image_digest }}
+
+
+jobs:
+  set-version:
+    name: Set the version of the container image for ArgoCD Application
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.app_url }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.argocd_repository }}
+        ssh-key: ${{ secrets.deploy_key }}
+        ref: main
+        sparse-checkout: |
+          clusters/${{ vars.kube_cluster }}
+
+    - name: Apply new version
+      id: set-version
+      run: |
+        cd clusters/${{ vars.kube_cluster }}
+
+        pushd ${{ inputs.app_dir }}
+        kustomize edit set image ${{ inputs.app_name }}=${{ vars.IMAGE_REGISTRY }}/${{ vars.IMAGE_REPOSITORY }}:${{ inputs.app_version }}
+        popd
+
+    - name: Create Git Commit
+      id: create-git-commit
+      run: |
+        git config --global user.name '${{ inputs.git_user_name }}'
+        git config --global user.email '${{ inputs.git_user_email }}'
+        git add .
+
+        GIT_COMMIT_MESSAGE='${{ inputs.git_commit_message != '' && inputs.git_commit_message || format('Update {0} app to {1} from {2}', inputs.app_name, inputs.app_version, github.repository) }}'
+        git commit --allow-empty -m "$GIT_COMMIT_MESSAGE"
+
+    - name: Push Git Commit
+      id: push-git-commit
+      run: |
+        git branch --set-upstream-to origin/main
+        git pull --rebase
+        git push
+
+    # outputs:
+    #   image_version: ${{ steps.docker-metadata.outputs.version }}
+    #   image_tags: ${{ steps.docker-metadata.outputs.tags }}
+    #   image_id: ${{ steps.docker-build-push.outputs.imageid }}
+    #   image_digest: ${{ steps.docker-build-push.outputs.digest }}
