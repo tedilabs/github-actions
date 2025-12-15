@@ -102,7 +102,7 @@ jobs:
     steps:
     - name: Add Labels by Labeler
       id: auto-label
-      uses: actions/labeler@v5
+      uses: actions/labeler@v6
       with:
         repo-token: ${{ secrets.token }}
         configuration-path: ${{ inputs.labeler_config_file }}
