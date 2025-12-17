@@ -1,0 +1,46 @@
+name: GitHub Issue - Welcome for First Contributors
+
+
+on:
+  workflow_call:
+    inputs:
+      issue_message:
+        type: string
+        required: false
+        default: |
+          ### :wave: Welcome! Looks like this is your first issue.
+
+          Hey, thanks for your contribution! Please give us a bit of time to review it. 😄
+
+          **Be sure to follow the issue template!**
+        description: "(Optional) The welcome message to post on the first issue created by a contributor."
+      pr_message:
+        type: string
+        required: false
+        default: |
+          ### :wave: Welcome! Looks like this is your first pull request.
+
+          Hey, thanks for your contribution! Please give us a bit of time to review it. 😄
+
+          **Please check out our contributing guidelines.**
+        description: "(Optional) The welcome message to post on the first pull request created by a contributor."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+
+jobs:
+  welcome:
+    name: Welcome First Time Contributors
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Welcome for First Issue or Pull Request
+      id: welcome
+      uses: actions/first-interaction@v3
+      with:
+        repo-token: ${{ secrets.token }}
+        issue-message: ${{ inputs.issue_message }}
+        pr-message: ${{ inputs.pr_message }}
