@@ -24,10 +24,6 @@ on:
         type: string
         required: true
         description: ""
-      # kube_cluster:
-      #   type: string
-      #   required: true
-      #   description: "(Required) The Kubernetes cluster name of the target ArgoCD application. Valid values are `apne1-mars` and `apne1-terra`."
       argocd_repository:
         type: string
         required: false
