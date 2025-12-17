@@ -41,6 +41,6 @@ jobs:
       id: welcome
       uses: actions/first-interaction@v3
       with:
-        repo-token: ${{ secrets.token }}
-        issue-message: ${{ inputs.issue_message }}
-        pr-message: ${{ inputs.pr_message }}
+        repo_token: ${{ secrets.token }}
+        issue_message: ${{ inputs.issue_message }}
+        pr_message: ${{ inputs.pr_message }}
