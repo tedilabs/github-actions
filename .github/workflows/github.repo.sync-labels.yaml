@@ -9,12 +9,21 @@ on:
         required: false
         default: ".github/labels.yaml"
         description: "(Optional) The path to the `sync-labels` config file. Defaults to `.github/labels.yaml`."
-
+      dry_run:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether to run in dry-run mode. Defaults to `false`."
       exclude_labels:
         type: string
         required: false
         default: ""
         description: "(Optional) Newline-delimited list of labels pattern(s)/matcher to exclude."
+      skip_delete:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether to skip deleting labels that are not defined in the config file. Defaults to `false`."
 
     secrets:
       token:
@@ -32,11 +41,23 @@ jobs:
       id: checkout
       uses: actions/checkout@v6
 
+    - name: Check config file exists
+      id: check-config
+      run: |
+        if [[ ! -f "${{ inputs.config_file }}" ]]; then
+          echo "Config file ${{ inputs.config_file }} does not exist. Skipping label sync."
+          echo "skip=true" >> $GITHUB_OUTPUT
+        else
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Sync Labels
       id: sync-labels
+      if: steps.check-config.outputs.skip != 'true'
       uses: crazy-max/ghaction-github-labeler@v5
       with:
         github-token: ${{ secrets.token }}
         yaml-file: ${{ inputs.config_file }}
-        dry-run: ${{ github.event_name == 'pull_request' }}
+        dry-run: ${{ inputs.dry_run }}
         exclude: ${{ inputs.exclude_labels }}
+        skip-delete: ${{ inputs.skip_delete }}
