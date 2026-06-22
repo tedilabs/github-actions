@@ -1,0 +1,89 @@
+name: MISC - String Interpolation
+description: Interpolate placeholders in JSON templates with GitHub context values.
+
+inputs:
+  inputs:
+    required: true
+    description: |
+      (Optional) JSON object of key-value pairs to render.
+      Supported placeholders:
+      - <pr-number>: Pull request number
+      - <source-branch>: Source branch name (e.g., `feature-branch`)
+      - <target-branch>: Target branch name (e.g., `main`)
+      - <ref-name>: Reference name (e.g., `pr-123`, `main`, `v1.0.0`)
+      - <sha>: Full commit SHA
+      - <short-sha>: Short commit SHA (7 chars)
+      - <repo-name>: Repository name
+      - <owner>: Repository owner
+      Example: `previews/<pr-number>/` or `branch/<source-branch>/`
+
+outputs:
+  interpolated:
+    description: The rendered key-value pairs after interpolation.
+    value: ${{ steps.interpolation.outputs.interpolated }}
+
+runs:
+  using: composite
+  steps:
+  - name: Set environment info
+    id: set-env-info
+    shell: bash
+    run: |
+      case "${{ github.event_name }}" in
+        pull_request)
+          echo "SOURCE_BRANCH=${{ github.head_ref }}" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=${{ github.base_ref }}" >> $GITHUB_ENV
+          echo "REF_NAME=pr-${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          ;;
+        push)
+          echo "SOURCE_BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=" >> $GITHUB_ENV
+          echo "REF_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          ;;
+        tag)
+          echo "SOURCE_BRANCH=" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=" >> $GITHUB_ENV
+          echo "REF_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          ;;
+        workflow_dispatch)
+          echo "SOURCE_BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=" >> $GITHUB_ENV
+          echo "REF_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          ;;
+      esac
+
+  - name: String Interpolation
+    id: interpolation
+    uses: actions/github-script@v8
+    env:
+      INPUTS_JSON: ${{ inputs.inputs }}
+    with:
+      script: |
+        const raw = JSON.parse(process.env.INPUTS_JSON);
+
+        const replacements = {
+          '<pr-number>': '${{ github.event.pull_request.number }}',
+          '<source-branch>': '${{ env.SOURCE_BRANCH }}',
+          '<target-branch>': '${{ env.TARGET_BRANCH }}',
+          '<ref-name>': '${{ env.REF_NAME }}',
+          '<sha>': '${{ github.sha }}',
+          '<short-sha>': '${{ github.sha }}'.substring(0, 7),
+          '<repo-name>': '${{ github.event.repository.name }}',
+          '<owner>': '${{ github.repository_owner }}'
+        };
+
+        function render(s) {
+          let result = s || '';
+          for (const [key, value] of Object.entries(replacements)) {
+            result = result.replaceAll(key, value);
+          }
+          return result;
+        }
+
+        const interpolated = {};
+        for (const [key, value] of Object.entries(raw)) {
+          interpolated[key] = render(value);
+        }
+
+        core.setOutput('interpolated', JSON.stringify(interpolated));
+        console.log('Interpolated:', JSON.stringify(interpolated, null, 2));

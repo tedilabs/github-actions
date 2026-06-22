@@ -1,0 +1,82 @@
+name: AWS - Configure Credentials
+description: Configure AWS credentials in your workflows.
+
+
+inputs:
+  aws_region:
+    required: false
+    description: "(Optional) The region of the AWS."
+  aws_access_key_id:
+    required: false
+    description: "(Optional) The access key ID used to authenticate to the AWS."
+  aws_secret_access_key:
+    required: false
+    description: "(Optional) The secret access key used to authenticate to the AWS."
+  aws_github_oidc_iam_role:
+    required: false
+    description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate."
+  aws_github_oidc_session_name:
+    required: false
+    default: GitHubActions
+    description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+  aws_github_oidc_audience:
+    required: false
+    default: sts.amazonaws.com
+    description: "(Optional) The OIDC audience to be specified when the JWT is created. Defaults to `sts.amazonaws.com`. This will work for most cases. Changing the default audience may be necessary when using non-default AWS partitions, such as China regions."
+  aws_chained_iam_role:
+    required: false
+    description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
+  aws_chained_session_name:
+    required: false
+    default: GitHubActions
+    description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
+
+outputs:
+  aws_account_id:
+    value: ${{ (inputs.aws_access_key_id != '' && inputs.aws_secret_access_key != '') && steps.configure-access-key.outputs.aws-account-id || (inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role == '') && steps.configure-github-oidc-iam-role.outputs.aws-account-id || (inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role != '') && steps.configure-chained-iam-role.outputs.aws-account-id }}
+    description: The AWS account ID for the provided credentials
+  aws_access_key_id:
+    value: ${{ (inputs.aws_access_key_id != '' && inputs.aws_secret_access_key != '') && steps.configure-access-key.outputs.aws-access-key-id || (inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role == '') && steps.configure-github-oidc-iam-role.outputs.aws-access-key-id || (inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role != '') && steps.configure-chained-iam-role.outputs.aws-access-key-id }}
+    description: The AWS access key ID for the provided credentials
+  expire_at:
+    value: ${{ (inputs.aws_access_key_id != '' && inputs.aws_secret_access_key != '') && steps.configure-access-key.outputs.aws-expiration || (inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role == '') && steps.configure-github-oidc-iam-role.outputs.aws-expiration || (inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role != '') && steps.configure-chained-iam-role.outputs.aws-expiration }}
+    description: The expiration time for the provided credentials
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Configure Access Key
+    id: configure-access-key
+    if: ${{ inputs.aws_access_key_id != '' && inputs.aws_secret_access_key != '' }}
+    uses: aws-actions/configure-aws-credentials@v6
+    with:
+      aws-region: ${{ inputs.aws_region }}
+      aws-access-key-id: ${{ inputs.aws_access_key_id }}
+      aws-secret-access-key: ${{ inputs.aws_secret_access_key }}
+      role-to-assume: ${{ inputs.aws_chained_iam_role }}
+      role-session-name: ${{ inputs.aws_chained_session_name }}
+      mask-aws-account-id: true
+
+  - name: Configure GitHub OIDC IAM Role
+    id: configure-github-oidc-iam-role
+    if: ${{ inputs.aws_github_oidc_iam_role != '' }}
+    uses: aws-actions/configure-aws-credentials@v6
+    with:
+      aws-region: ${{ inputs.aws_region }}
+      role-to-assume: ${{ inputs.aws_github_oidc_iam_role }}
+      role-session-name: ${{ inputs.aws_github_oidc_session_name }}
+      audience: ${{ inputs.aws_github_oidc_audience }}
+      mask-aws-account-id: true
+
+  - name: Configure Chained IAM Role
+    id: configure-chained-iam-role
+    if: ${{ inputs.aws_github_oidc_iam_role != '' && inputs.aws_chained_iam_role != '' }}
+    uses: aws-actions/configure-aws-credentials@v6
+    with:
+      aws-region: ${{ inputs.aws_region }}
+      role-to-assume: ${{ inputs.aws_chained_iam_role }}
+      role-session-name: ${{ inputs.aws_chained_session_name }}
+      role-chaining: true
+      mask-aws-account-id: true
