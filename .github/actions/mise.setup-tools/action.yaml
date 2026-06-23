@@ -1,0 +1,129 @@
+name: Mise - Setup Tools
+description: Install and set up development tools with mise.
+
+
+inputs:
+  mise_version:
+    required: false
+    description: "(Optional) The version of mise to install. Defaults to the latest release if omitted."
+  mise_checksum:
+    required: false
+    description: "(Optional) The SHA256 checksum used to verify the downloaded mise binary."
+  mise_dir:
+    required: false
+    description: "(Optional) The directory where mise is installed. Defaults to `$HOME/.local/share/mise`."
+
+  tool_versions:
+    required: false
+    description: "(Optional) The content to write to a `.tool-versions` file before running mise. Useful when the tools are not defined in the repository."
+  mise_toml:
+    required: false
+    description: "(Optional) The content to write to a `mise.toml` file before running mise. Useful when the tools are not defined in the repository."
+  working_directory:
+    required: false
+    description: "(Optional) The directory in which mise runs. Defaults to the workspace root."
+
+  install:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to run the install/bootstrap commands. Defaults to `true`."
+  install_args:
+    required: false
+    description: "(Optional) The arguments to pass to `mise install` (e.g., `bun`)."
+  bootstrap:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to run `mise bootstrap` instead of `mise install`. Defaults to `false`."
+  bootstrap_skip:
+    required: false
+    description: "(Optional) A comma-separated list of parts to skip during `mise bootstrap`."
+  bootstrap_args:
+    required: false
+    description: "(Optional) The additional arguments to pass to `mise bootstrap`."
+  reshim:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to run `mise reshim --all` after setup. Defaults to `false`."
+  add_shims_to_path:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to add the mise shims directory to the `PATH`. Defaults to `true`."
+  env:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to load the mise environment variables into `GITHUB_ENV`. Defaults to `true`."
+
+  cache:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to enable reading from and writing to the cache. Defaults to `true`."
+  cache_save:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to enable writing to the cache. Defaults to `true`."
+  cache_key_prefix:
+    required: false
+    default: mise-v1
+    description: "(Optional) The prefix used for the cache keys. Defaults to `mise-v1`."
+  cache_key:
+    required: false
+    description: "(Optional) The complete cache key override with template support. When set, it takes precedence over `cache_key_prefix`."
+
+  experimental:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to enable experimental mise features. Defaults to `false`."
+  log_level:
+    required: false
+    default: info
+    description: "(Optional) The logging verbosity level for mise. Defaults to `info`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub API token used to authenticate requests to GitHub. Defaults to the automatically generated `github.token`."
+  fetch_from_github:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to fetch the mise binary from GitHub instead of `mise.jdx.dev`. Defaults to `true`."
+  wings_enabled:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to opt into the experimental mise-wings asset cache. Defaults to `false`."
+
+outputs:
+  cache_hit:
+    value: ${{ steps.setup-mise.outputs.cache-hit }}
+    description: "Whether the cache was successfully restored."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Setup Tools with mise
+    id: setup-mise
+    uses: jdx/mise-action@v4
+    with:
+      version: ${{ inputs.mise_version }}
+      sha256: ${{ inputs.mise_checksum }}
+      mise_dir: ${{ inputs.mise_dir }}
+      tool_versions: ${{ inputs.tool_versions }}
+      mise_toml: ${{ inputs.mise_toml }}
+      working_directory: ${{ inputs.working_directory }}
+      install: ${{ inputs.install }}
+      install_args: ${{ inputs.install_args }}
+      bootstrap: ${{ inputs.bootstrap }}
+      bootstrap_skip: ${{ inputs.bootstrap_skip }}
+      bootstrap_args: ${{ inputs.bootstrap_args }}
+      reshim: ${{ inputs.reshim }}
+      add_shims_to_path: ${{ inputs.add_shims_to_path }}
+      env: ${{ inputs.env }}
+      cache: ${{ inputs.cache }}
+      cache_save: ${{ inputs.cache_save }}
+      cache_key_prefix: ${{ inputs.cache_key_prefix }}
+      cache_key: ${{ inputs.cache_key }}
+      experimental: ${{ inputs.experimental }}
+      log_level: ${{ inputs.log_level }}
+      github_token: ${{ inputs.github_token }}
+      fetch_from_github: ${{ inputs.fetch_from_github }}
+      wings_enabled: ${{ inputs.wings_enabled }}
