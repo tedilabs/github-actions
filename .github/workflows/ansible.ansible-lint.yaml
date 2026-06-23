@@ -1,0 +1,70 @@
+name: Ansible - ansible-lint
+
+
+on:
+  workflow_call:
+    inputs:
+      ansible_lint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `ansible-lint` to install. Defaults to `latest`. Not implemented yet."
+      python_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The Python version (installed via mise) used to run `ansible-lint`. Defaults to `latest`."
+      working_directory:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) The directory to run `ansible-lint` from (where `.ansible-lint` / `ansible.cfg` live). Defaults to `./`."
+      galaxy_requirements_file:
+        type: string
+        required: false
+        default: ""
+        description: "(Optional) Path to a Galaxy `requirements` file. When set, its collections are installed and made resolvable to `ansible-lint`."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+
+jobs:
+  ansible-lint:
+    name: Lint Ansible content
+    runs-on: ubuntu-latest
+
+    env:
+      ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/.ansible/collections
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v6
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          python = "${{ inputs.python_version }}"
+
+    - name: Install ansible-lint
+      id: install-ansible-lint
+      run: python -m pip install ansible-lint
+
+    - name: Install Galaxy collections
+      id: install-collections
+      if: ${{ inputs.galaxy_requirements_file != '' }}
+      run: |
+        ansible-galaxy collection install \
+          -r ${{ inputs.galaxy_requirements_file }} \
+          -p ${{ github.workspace }}/.ansible/collections
+
+    - name: Run ansible-lint
+      id: ansible-lint
+      working-directory: ${{ inputs.working_directory }}
+      run: ansible-lint --format github
