@@ -1,0 +1,45 @@
+name: Packer - Format
+
+
+on:
+  workflow_call:
+    inputs:
+      packer_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `packer` to install. Defaults to `latest`."
+      packer_target_dir:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) A directory path to check formatting (recursively). Defaults to `./`."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+
+jobs:
+  fmt:
+    name: Check Packer formatting
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v6
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          packer = "${{ inputs.packer_version }}"
+
+    - name: Check Format
+      id: fmt
+      run: |
+        packer fmt -check -diff -recursive ${{ inputs.packer_target_dir }}

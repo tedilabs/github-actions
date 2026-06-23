@@ -1,0 +1,56 @@
+name: Packer - Validate
+
+
+on:
+  workflow_call:
+    inputs:
+      packer_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `packer` to install. Defaults to `latest`."
+      packer_target_dir:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) The Packer template directory to initialize and validate. Defaults to `./`."
+      aws_region:
+        type: string
+        required: false
+        default: us-east-1
+        description: "(Optional) A region exported as `AWS_DEFAULT_REGION` so `packer validate` can resolve a region without credentials. Defaults to `us-east-1`."
+
+    secrets:
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+
+jobs:
+  validate:
+    name: Validate Packer template
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v6
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          packer = "${{ inputs.packer_version }}"
+
+    - name: Packer Init
+      id: init
+      run: packer init ${{ inputs.packer_target_dir }}
+
+    - name: Packer Validate
+      id: validate
+      run: packer validate ${{ inputs.packer_target_dir }}
