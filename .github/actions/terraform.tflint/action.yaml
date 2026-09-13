@@ -11,6 +11,10 @@ inputs:
     required: false
     default: .tflint.hcl
     description: "(Optional) The path to the `tflint` config file, relative to the repository root. Defaults to `.tflint.hcl`."
+  recursive:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to lint every directory under `target_dir` that contains Terraform files, using the same config file for all of them. Defaults to `false`."
   minimum_failure_severity:
     required: false
     default: warning
@@ -46,10 +50,19 @@ runs:
     shell: bash
     env:
       GITHUB_TOKEN: ${{ inputs.github_token }}
+      TARGET_DIR: ${{ inputs.target_dir }}
       CONFIG_FILE: ${{ inputs.config_file }}
+      RECURSIVE: ${{ inputs.recursive }}
     run: |
+      # A trailing slash (e.g. `./`) makes `--recursive` silently skip every subdirectory, so strip it.
+      target_dir="${TARGET_DIR%/}"
+      args=(--chdir "${target_dir:-.}" --config "$(realpath "$CONFIG_FILE")")
+      if [ "$RECURSIVE" = "true" ]; then
+        args+=(--recursive)
+      fi
+
       tflint --version
-      tflint --init --config "$(realpath "$CONFIG_FILE")"
+      tflint "${args[@]}" --init
 
   - name: Run TFLint
     id: tflint
@@ -57,11 +70,17 @@ runs:
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
       CONFIG_FILE: ${{ inputs.config_file }}
+      RECURSIVE: ${{ inputs.recursive }}
       MINIMUM_FAILURE_SEVERITY: ${{ inputs.minimum_failure_severity }}
       FORMAT: ${{ inputs.format }}
     run: |
-      tflint \
-        --chdir "$TARGET_DIR" \
-        --config "$(realpath "$CONFIG_FILE")" \
+      # A trailing slash (e.g. `./`) makes `--recursive` silently skip every subdirectory, so strip it.
+      target_dir="${TARGET_DIR%/}"
+      args=(--chdir "${target_dir:-.}" --config "$(realpath "$CONFIG_FILE")")
+      if [ "$RECURSIVE" = "true" ]; then
+        args+=(--recursive)
+      fi
+
+      tflint "${args[@]}" \
         --format "$FORMAT" \
         --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY"
