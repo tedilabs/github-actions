@@ -4,6 +4,16 @@ name: GitHub Repo - Sync Labels
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       config_file:
         type: string
         required: false
@@ -34,7 +44,7 @@ on:
 jobs:
   sync-labels:
     name: Sync labels to the GitHub Repository
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
     steps:
     - name: Checkout

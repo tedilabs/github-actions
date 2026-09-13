@@ -4,6 +4,16 @@ name: GitHub PR - Auto Assign
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       config_file:
         type: string
         required: false
@@ -19,7 +29,7 @@ on:
 jobs:
   auto-assign:
     name: Add reviewers and assignees to the Pull Request
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
     steps:
     - name: Add Reviewers and Assignees

@@ -4,6 +4,16 @@ name: YAML - yamllint
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       yamllint_version:
         type: string
         required: false
@@ -29,7 +39,7 @@ on:
 jobs:
   yamllint:
     name: Lint YAML files
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
     steps:
     - name: Checkout

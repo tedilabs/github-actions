@@ -4,6 +4,16 @@ name: GitHub PR - Auto Label
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       labeler_enabled:
         type: boolean
         required: false
@@ -96,7 +106,7 @@ on:
 jobs:
   labeler:
     name: Add labels by Labeler
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
     if: ${{ inputs.labeler_enabled }}
 
     steps:
@@ -117,7 +127,7 @@ jobs:
 
   pr-size-labeler:
     name: Add labels by PR Size Labeler
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
     if: ${{ inputs.pr_size_enabled }}
 
     steps:

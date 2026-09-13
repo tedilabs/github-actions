@@ -4,6 +4,16 @@ name: GitHub Issue - Welcome for First Contributors
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       issue_message:
         type: string
         required: false
@@ -34,7 +44,7 @@ on:
 jobs:
   welcome:
     name: Welcome First Time Contributors
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
     steps:
     - name: Welcome for First Issue or Pull Request
