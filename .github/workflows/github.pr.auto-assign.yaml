@@ -24,7 +24,7 @@ jobs:
     steps:
     - name: Add Reviewers and Assignees
       id: auto-assign
-      uses: kentaro-m/auto-assign-action@v2.0.0
+      uses: kentaro-m/auto-assign-action@v2.0.2
       with:
         configuration-path: ${{ inputs.config_file }}
         repo-token: ${{ secrets.token }}

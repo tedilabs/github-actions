@@ -39,7 +39,7 @@ jobs:
     steps:
     - name: Checkout
       id: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Check config file exists
       id: check-config
@@ -54,7 +54,7 @@ jobs:
     - name: Sync Labels
       id: sync-labels
       if: steps.check-config.outputs.skip != 'true'
-      uses: crazy-max/ghaction-github-labeler@v5
+      uses: crazy-max/ghaction-github-labeler@v6
       with:
         github-token: ${{ secrets.token }}
         yaml-file: ${{ inputs.config_file }}

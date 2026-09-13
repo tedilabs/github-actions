@@ -54,7 +54,7 @@ runs:
 
   - name: String Interpolation
     id: interpolation
-    uses: actions/github-script@v8
+    uses: actions/github-script@v9
     env:
       INPUTS_JSON: ${{ inputs.inputs }}
     with:

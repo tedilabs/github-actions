@@ -163,18 +163,18 @@ jobs:
     steps:
     - name: Checkout
       id: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Set up QEMU
       id: setup-qemu
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
       if: ${{ inputs.qemu_enabled }}
       with:
         platforms: ${{ inputs.qemu_platforms }}
 
     - name: Set up Docker Buildx
       id: docker-buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
       with:
         version: ${{ inputs.buildx_version }}
         driver: ${{ inputs.buildx_driver }}
@@ -182,7 +182,7 @@ jobs:
 
     - name: Login to Container Registry (Docker Hub)
       id: docker-login-dockerhub
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       if: ${{ env.DOCKERHUB_ENABLED == 'true' }}
       with:
         username: ${{ secrets.dockerhub_username }}
@@ -203,14 +203,14 @@ jobs:
 
     - name: Login to Container Registry (AWS ECR)
       id: docker-login-aws-ecr
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       if: ${{ env.AWS_ECR_ENABLED == 'true' }}
       with:
         registry: ${{ env.AWS_ECR_REGISTRY }}
 
     - name: Prepare metadata for Container Image
       id: docker-metadata
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6
       with:
         context: workflow
         images: |
@@ -226,7 +226,7 @@ jobs:
 
     - name: Build, tag, and push image to Container Registry
       id: docker-build-push
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: ${{ inputs.build_context }}
         file: ${{ inputs.build_dockerfile }}
