@@ -4,6 +4,16 @@ name: Web Cache Invalidation (AWS CloudFront)
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       aws_github_oidc_audience:
         type: string
         required: false
@@ -13,6 +23,10 @@ on:
         type: string
         required: false
         description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+      aws_chained_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
       aws_cloudfront_distribution_id:
         type: string
         required: true
@@ -38,6 +52,9 @@ on:
       aws_github_oidc_iam_role:
         required: false
         description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate to the AWS account."
+      aws_chained_iam_role:
+        required: false
+        description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
       token:
         required: false
         description: "(Optional) The GitHub API token to use when communicating with GitHub API."
@@ -56,54 +73,27 @@ on:
 jobs:
   invalidate:
     name: Invalidate CloudFront Cache
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      id-token: write
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
     steps:
-    - name: Configure AWS Credentials
-      id: configure-aws-credentials
-      uses: aws-actions/configure-aws-credentials@v5
-      with:
-        aws-region: us-east-1
-        aws-access-key-id: ${{ secrets.aws_access_key_id }}
-        aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
-        role-to-assume: ${{ secrets.aws_github_oidc_iam_role }}
-        role-session-name: ${{ inputs.aws_github_oidc_session_name }}
-        audience: ${{ inputs.aws_github_oidc_audience }}
-        mask-aws-account-id: true
-
     - name: Invalidate CloudFront Cache
-      id: invalidate-cache
-      run: |
-        input="${{ inputs.aws_cloudfront_invalidation_paths }}"
+      id: invalidate
+      uses: tedilabs/github-actions/.github/actions/web.cloudfront.invalidation@main
+      with:
+        aws_region: us-east-1
+        aws_access_key_id: ${{ secrets.aws_access_key_id }}
+        aws_secret_access_key: ${{ secrets.aws_secret_access_key }}
+        aws_github_oidc_iam_role: ${{ secrets.aws_github_oidc_iam_role }}
+        aws_github_oidc_session_name: ${{ inputs.aws_github_oidc_session_name }}
+        aws_github_oidc_audience: ${{ inputs.aws_github_oidc_audience }}
+        aws_chained_iam_role: ${{ secrets.aws_chained_iam_role }}
+        aws_chained_session_name: ${{ inputs.aws_chained_session_name }}
 
-        input_paths=$(echo "$input" | sed 's/[[:space:]]*,[[:space:]]*/ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-
-        INVALIDATION_ID=$(aws cloudfront create-invalidation \
-          --distribution-id ${{ inputs.aws_cloudfront_distribution_id }} \
-          --paths "$input_paths" \
-          --query 'Invalidation.Id' \
-          --output text)
-
-        echo "Created invalidation: $INVALIDATION_ID"
-        echo "invalidation-id=$INVALIDATION_ID" >> $GITHUB_OUTPUT
-        echo "invalidation-paths=$input_paths" >> $GITHUB_OUTPUT
-        echo "distribution-id=${{ inputs.aws_cloudfront_distribution_id }}" >> $GITHUB_OUTPUT
-
-        if [ "${{ inputs.aws_cloudfront_invalidation_wait }}" = "true" ]; then
-          echo "Waiting for invalidation to complete..."
-          aws cloudfront wait invalidation-completed \
-            --distribution-id ${{ inputs.aws_cloudfront_distribution_id }} \
-            --id "$INVALIDATION_ID"
-          echo "Invalidation completed successfully"
-        else
-          echo "Skipping wait for invalidation completion (aws_cloudfront_invalidation_wait=false)"
-        fi
+        aws_cloudfront_distribution_id: ${{ inputs.aws_cloudfront_distribution_id }}
+        aws_cloudfront_invalidation_paths: ${{ inputs.aws_cloudfront_invalidation_paths }}
+        aws_cloudfront_invalidation_wait: ${{ inputs.aws_cloudfront_invalidation_wait }}
 
     outputs:
-      invalidation_id: ${{ steps.invalidate-cache.outputs.invalidation-id }}
-      invalidation_paths: ${{ steps.invalidate-cache.outputs.invalidation-paths }}
-      distribution_id: ${{ steps.invalidate-cache.outputs.distribution-id }}
+      invalidation_id: ${{ steps.invalidate.outputs.invalidation_id }}
+      invalidation_paths: ${{ steps.invalidate.outputs.invalidation_paths }}
+      distribution_id: ${{ steps.invalidate.outputs.distribution_id }}

@@ -4,6 +4,16 @@ name: Docker - Delivery
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
       qemu_enabled:
         type: boolean
         required: false
@@ -48,6 +58,14 @@ on:
         type: string
         required: false
         description: "(Optional) A list of build-time variables."
+      build_cache_from:
+        type: string
+        required: false
+        description: "(Optional) A list of external cache sources for buildx (e.g., `user/app:cache`, `type=local,src=path/to/dir`)."
+      build_cache_to:
+        type: string
+        required: false
+        description: "(Optional) A list of cache export destinations for buildx (e.g., `user/app:cache`, `type=local,dest=path/to/dir`)"
       prebuild_commands:
         type: string
         required: false
@@ -96,6 +114,10 @@ on:
         type: string
         required: false
         description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+      aws_chained_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
 
     secrets:
       dockerhub_username:
@@ -106,13 +128,16 @@ on:
         description: "(Optional) The personal access token used to log against the Docker Hub."
       aws_access_key_id:
         required: false
-        description: "(Optional) The access key ID used to authenticate to the AWS ECR."
+        description: "(Optional) The access key ID used to authenticate to the AWS account."
       aws_secret_access_key:
         required: false
-        description: "(Optional) The secret access key used to authenticate to the AWS ECR."
+        description: "(Optional) The secret access key used to authenticate to the AWS account."
       aws_github_oidc_iam_role:
         required: false
-        description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate to the AWS ECR."
+        description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate to the AWS account."
+      aws_chained_iam_role:
+        required: false
+        description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
       token:
         required: false
         description: "(Optional) The GitHub API token to use when communicating with GitHub API."
@@ -153,7 +178,7 @@ on:
 jobs:
   delivery:
     name: Build and Push Docker Container Image to the Repository
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
     env:
       DOCKERHUB_ENABLED: ${{ secrets.dockerhub_username != '' && secrets.dockerhub_token != '' }}
@@ -190,16 +215,17 @@ jobs:
 
     - name: Configure AWS Credentials
       id: configure-aws-credentials
-      uses: aws-actions/configure-aws-credentials@v5
+      uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
       if: ${{ env.AWS_ECR_ENABLED == 'true' }}
       with:
-        aws-region: ${{ inputs.aws_ecr_region }}
-        aws-access-key-id: ${{ secrets.aws_access_key_id }}
-        aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
-        role-to-assume: ${{ secrets.aws_github_oidc_iam_role }}
-        role-session-name: ${{ inputs.aws_github_oidc_session_name }}
-        audience: ${{ inputs.aws_github_oidc_audience }}
-        mask-aws-account-id: true
+        aws_region: ${{ inputs.aws_ecr_region }}
+        aws_access_key_id: ${{ secrets.aws_access_key_id }}
+        aws_secret_access_key: ${{ secrets.aws_secret_access_key }}
+        aws_github_oidc_iam_role: ${{ secrets.aws_github_oidc_iam_role }}
+        aws_github_oidc_session_name: ${{ inputs.aws_github_oidc_session_name }}
+        aws_github_oidc_audience: ${{ inputs.aws_github_oidc_audience }}
+        aws_chained_iam_role: ${{ secrets.aws_chained_iam_role }}
+        aws_chained_session_name: ${{ inputs.aws_chained_session_name }}
 
     - name: Login to Container Registry (AWS ECR)
       id: docker-login-aws-ecr
@@ -233,6 +259,8 @@ jobs:
         target: ${{ inputs.build_target }}
         platforms: ${{ inputs.build_platforms }}
         build-args: ${{ inputs.build_args }}
+        cache-from: ${{ inputs.build_cache_from }}
+        cache-to: ${{ inputs.build_cache_to }}
         push: ${{ inputs.push_image }}
         tags: ${{ steps.docker-metadata.outputs.tags }}
         labels: ${{ steps.docker-metadata.outputs.labels }}
