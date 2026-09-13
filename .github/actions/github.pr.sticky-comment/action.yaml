@@ -1,0 +1,118 @@
+name: GitHub - PR Sticky Comment
+description: Create or update a single "sticky" comment on a pull request, identified by a hidden HTML marker.
+
+inputs:
+  marker:
+    required: true
+    description: "(Required) The unique identifier of the sticky comment. It is wrapped as a hidden HTML comment (e.g. `<!-- my-marker -->`) and prepended to the body, so the action can find and update its own previous comment instead of creating a new one."
+  body:
+    required: true
+    description: "(Required) The comment body in Markdown. The hidden marker is prepended automatically, so it does not need to be included."
+  pr_number:
+    required: false
+    default: ""
+    description: "(Optional) The pull request number to comment on. Defaults to the pull request number from the event context. Required on events without a pull request context (e.g. `workflow_run`)."
+  strategy:
+    required: false
+    default: update
+    description: "(Optional) How to refresh an existing sticky comment, one of `update`, `recreate`, or `append`. `update` edits the existing comment in place, keeping its position in the timeline. `recreate` deletes the existing comment and creates a new one at the bottom. `append` keeps the existing comment body and appends the new body to the end, separated by a `---` divider. Either way, a new comment is created when none exists. Defaults to `update`."
+  skip_if_unchanged:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to skip the API write when it would not change the comment. For `update` and `recreate`, skips when the rendered body is identical to the existing comment. For `append`, skips when the existing comment already ends with the new body, preventing duplicate consecutive appends. Has no effect when no comment exists yet. Defaults to `false`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used to list, create, update, and delete comments. Requires the `pull-requests: write` permission. Defaults to the workflow's default token."
+
+outputs:
+  comment_id:
+    description: The ID of the created or updated comment.
+    value: ${{ steps.sticky-comment.outputs.comment_id }}
+  operation:
+    description: The performed operation, one of `created`, `updated`, `recreated`, `appended`, or `skipped`.
+    value: ${{ steps.sticky-comment.outputs.operation }}
+
+runs:
+  using: composite
+  steps:
+  - name: Create or update the sticky comment
+    id: sticky-comment
+    uses: actions/github-script@v9
+    env:
+      MARKER: ${{ inputs.marker }}
+      BODY: ${{ inputs.body }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      STRATEGY: ${{ inputs.strategy }}
+      SKIP_IF_UNCHANGED: ${{ inputs.skip_if_unchanged }}
+    with:
+      github-token: ${{ inputs.github_token }}
+      script: |
+        const marker = `<!-- ${process.env.MARKER} -->`;
+        const body = `${marker}\n${process.env.BODY}`;
+        const strategy = process.env.STRATEGY;
+        const skipIfUnchanged = process.env.SKIP_IF_UNCHANGED === 'true';
+        const { owner, repo } = context.repo;
+
+        if (!['update', 'recreate', 'append'].includes(strategy)) {
+          core.setFailed(`Invalid \`strategy\` input: '${strategy}'. Expected 'update', 'recreate', or 'append'.`);
+          return;
+        }
+
+        // `context.issue.number` resolves the number from the `pull_request` or
+        // `issue` payload, so it is undefined on events like `push` or `workflow_run`.
+        const issue_number = Number(process.env.PR_NUMBER) || context.issue.number;
+        if (!issue_number) {
+          core.setFailed('No pull request number found in the event context. Pass the `pr_number` input on events without a pull request context.');
+          return;
+        }
+
+        const comments = await github.paginate(github.rest.issues.listComments, {
+          owner, repo, issue_number,
+        });
+        const existing = comments.find(
+          (c) => c.user?.type === 'Bot' && c.body?.includes(marker),
+        );
+
+        // With `skip_if_unchanged`, avoid the API write when it would not change the comment:
+        // an identical body for `update`/`recreate`, or an already-appended body for `append`.
+        if (existing && skipIfUnchanged) {
+          const unchanged = strategy === 'append'
+            ? existing.body.endsWith(process.env.BODY)
+            : existing.body === body;
+          if (unchanged) {
+            core.setOutput('comment_id', existing.id);
+            core.setOutput('operation', 'skipped');
+            console.log(`Skipped the unchanged sticky comment ${existing.id} on PR #${issue_number}.`);
+            return;
+          }
+        }
+
+        if (existing && strategy === 'update') {
+          await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+          core.setOutput('comment_id', existing.id);
+          core.setOutput('operation', 'updated');
+          console.log(`Updated the sticky comment ${existing.id} on PR #${issue_number}.`);
+          return;
+        }
+
+        // `append` keeps the existing body and adds the new one below a divider.
+        if (existing && strategy === 'append') {
+          const appended = `${existing.body}\n\n---\n\n${process.env.BODY}`;
+          await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: appended });
+          core.setOutput('comment_id', existing.id);
+          core.setOutput('operation', 'appended');
+          console.log(`Appended to the sticky comment ${existing.id} on PR #${issue_number}.`);
+          return;
+        }
+
+        // `recreate` deletes the existing comment so the new one lands at the bottom.
+        if (existing) {
+          await github.rest.issues.deleteComment({ owner, repo, comment_id: existing.id });
+          console.log(`Deleted the sticky comment ${existing.id} on PR #${issue_number}.`);
+        }
+
+        const { data: created } = await github.rest.issues.createComment({ owner, repo, issue_number, body });
+        core.setOutput('comment_id', created.id);
+        core.setOutput('operation', existing ? 'recreated' : 'created');
+        console.log(`Created the sticky comment ${created.id} on PR #${issue_number}.`);
