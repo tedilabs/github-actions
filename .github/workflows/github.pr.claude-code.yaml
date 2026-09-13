@@ -1,0 +1,108 @@
+name: GitHub PR - Claude Code
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      provider:
+        type: string
+        required: false
+        default: claude-api
+        description: "(Optional) The Claude Code provider to use. Supported values are `claude-api` and `aws-bedrock`. Defaults to `claude-api`."
+      settings:
+        type: string
+        required: false
+        default: ""
+        description: "(Optional) Claude Code settings as JSON string or path to settings JSON file."
+      claude_args:
+        type: string
+        required: false
+        default: ""
+        description: "(Optional) Additional arguments to pass directly to Claude CLI."
+      github_additional_permissions:
+        type: string
+        required: false
+        default: ""
+        description: "(Optional) Additional GitHub permissions to request (e.g., 'actions: read')"
+      github_use_sticky_comment:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Use just one comment to deliver issue/PR comments. Defaults to `false`."
+      github_track_progress:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Force tag mode with tracking comments for pull_request and issue events. Only applicable to pull_request (opened, synchronize, ready_for_review, reopened) and issue (opened, edited, labeled, assigned) events. Defaults to `false`."
+      aws_region:
+        type: string
+        required: false
+        default: ap-northeast-1
+        description: "(Optional) The region of the AWS."
+
+    secrets:
+      github_app_id:
+        required: true
+      github_app_private_key:
+        required: true
+      anthropic_api_key:
+        required: false
+        description: "(Optional) Anthropic API key. Only required for `claude-api` provider, no needed for `aws-bedrock` providers."
+      claude_code_oauth_token:
+        required: false
+        description: "(Optional) Claude Code OAuth token (alternative to `anthropic_api_key`). Only required for `claude-api` provider, no needed for `aws-bedrock` providers."
+      aws_github_oidc_iam_role:
+        required: false
+        description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate."
+      aws_chained_iam_role:
+        required: false
+        description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
+
+
+jobs:
+  claude-code:
+    name: Call Claude Code Agent
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 1
+
+    - uses: actions/create-github-app-token@v3
+      id: app-token
+      with:
+        app-id: ${{ secrets.github_app_id }}
+        private-key: ${{ secrets.github_app_private_key }}
+        owner: ${{ github.repository_owner }}
+
+    - name: Run Claude Code
+      id: claude-code
+      uses: tedilabs/github-actions/.github/actions/ai-agent.claude-code@main
+      with:
+        provider: ${{ inputs.provider }}
+        settings: ${{ inputs.settings }}
+        claude_args: ${{ inputs.claude_args }}
+
+        github_additional_permissions: ${{ inputs.github_additional_permissions }}
+        github_use_sticky_comment: ${{ inputs.github_use_sticky_comment && 'true' || 'false' }}
+        github_track_progress: ${{ inputs.github_track_progress && 'true' || 'false' }}
+
+        token: ${{ steps.app-token.outputs.token }}
+        claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+
+        aws_region: ${{ inputs.aws_region }}
+        aws_github_oidc_iam_role: ${{ secrets.aws_github_oidc_iam_role }}
+        aws_chained_iam_role: ${{ secrets.aws_chained_iam_role }}

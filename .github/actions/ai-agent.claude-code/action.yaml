@@ -1,0 +1,137 @@
+name: AI Agent - Claude Code
+description: Run Claude Code AI agent in your workflows.
+
+
+inputs:
+  provider:
+    required: false
+    default: claude-api
+    description: "(Optional) The Claude Code provider to use. Supported values are `claude-api` and `aws-bedrock`. Defaults to `claude-api`."
+  prompt:
+    required: false
+    default: ""
+    description: "(Optional) Instructions for Claude. Can be a direct prompt or custom template."
+  settings:
+    required: false
+    default: ""
+    description: "(Optional) Claude Code settings as JSON string or path to settings JSON file."
+  claude_args:
+    required: false
+    default: ""
+    description: "(Optional) Additional arguments to pass directly to Claude CLI."
+  github_additional_permissions:
+    required: false
+    default: ""
+    description: "(Optional) Additional GitHub permissions to request (e.g., 'actions: read')"
+  github_use_sticky_comment:
+    required: false
+    default: "false"
+    description: "(Optional) Use just one comment to deliver issue/PR comments. Defaults to `false`."
+  github_track_progress:
+    required: false
+    default: "false"
+    description: "(Optional) Force tag mode with tracking comments for pull_request and issue events. Only applicable to pull_request (opened, synchronize, ready_for_review, reopened) and issue (opened, edited, labeled, assigned) events. Defaults to `false`."
+
+  token:
+    required: false
+    description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+  anthropic_api_key:
+    required: false
+    description: "(Optional) Anthropic API key. Only required for `claude-api` provider, no needed for `aws-bedrock` providers."
+  claude_code_oauth_token:
+    required: false
+    description: "(Optional) Claude Code OAuth token (alternative to `anthropic_api_key`). Only required for `claude-api` provider, no needed for `aws-bedrock` providers."
+
+  aws_region:
+    required: false
+    description: "(Optional) The region of the AWS."
+  aws_access_key_id:
+    required: false
+    description: "(Optional) The access key ID used to authenticate to the AWS."
+  aws_secret_access_key:
+    required: false
+    description: "(Optional) The secret access key used to authenticate to the AWS."
+  aws_github_oidc_iam_role:
+    required: false
+    description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate."
+  aws_github_oidc_session_name:
+    required: false
+    default: GitHubActions
+    description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+  aws_github_oidc_audience:
+    required: false
+    default: sts.amazonaws.com
+    description: "(Optional) The OIDC audience to be specified when the JWT is created. Defaults to `sts.amazonaws.com`. This will work for most cases. Changing the default audience may be necessary when using non-default AWS partitions, such as China regions."
+  aws_chained_iam_role:
+    required: false
+    description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
+  aws_chained_session_name:
+    required: false
+    default: GitHubActions
+    description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
+
+outputs:
+  execution_file:
+    value: ${{ inputs.provider == 'claude-api' && steps.claude-code-via-claude-api.outputs.execution_file || inputs.provider == 'aws-bedrock' && steps.claude-code-via-aws-bedrock.outputs.execution_file }}
+    description: "Path to the Claude Code execution output file."
+  branch_name:
+    value: ${{ inputs.provider == 'claude-api' && steps.claude-code-via-claude-api.outputs.branch_name || inputs.provider == 'aws-bedrock' && steps.claude-code-via-aws-bedrock.outputs.branch_name }}
+    description: "The branch created by Claude Code for this execution."
+  structured_output:
+    value: ${{ inputs.provider == 'claude-api' && steps.claude-code-via-claude-api.outputs.structured_output || inputs.provider == 'aws-bedrock' && steps.claude-code-via-aws-bedrock.outputs.structured_output }}
+    description: "JSON string containing all structured output fields when --json-schema is provided in claude_args. Use fromJSON() to parse: fromJSON(steps.id.outputs.structured_output).field_name."
+  session_id:
+    value: ${{ inputs.provider == 'claude-api' && steps.claude-code-via-claude-api.outputs.session_id || inputs.provider == 'aws-bedrock' && steps.claude-code-via-aws-bedrock.outputs.session_id }}
+    description: "The Claude Code session ID that can be used with --resume to continue this conversation."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Run Claude Code via Claude API
+    id: claude-code-via-claude-api
+    if: ${{ inputs.provider == 'claude-api' }}
+    uses: anthropics/claude-code-action@v1
+    with:
+      github_token: ${{ inputs.token }}
+      anthropic_api_key: ${{ inputs.anthropic_api_key }}
+      claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+
+      prompt: ${{ inputs.prompt }}
+      settings: ${{ inputs.settings }}
+      claude_args: ${{ inputs.claude_args }}
+
+      additional_permissions: ${{ inputs.github_additional_permissions }}
+      use_sticky_comment: ${{ inputs.github_use_sticky_comment }}
+      track_progress: ${{ inputs.github_track_progress }}
+
+  - name: Configure AWS Credentials
+    id: configure-aws-credentials
+    if: ${{ inputs.provider == 'aws-bedrock' }}
+    uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
+    with:
+      aws_region: ${{ inputs.aws_region }}
+      aws_access_key_id: ${{ inputs.aws_access_key_id }}
+      aws_secret_access_key: ${{ inputs.aws_secret_access_key }}
+      aws_github_oidc_iam_role: ${{ inputs.aws_github_oidc_iam_role }}
+      aws_github_oidc_session_name: ${{ inputs.aws_github_oidc_session_name }}
+      aws_github_oidc_audience: ${{ inputs.aws_github_oidc_audience }}
+      aws_chained_iam_role: ${{ inputs.aws_chained_iam_role }}
+      aws_chained_session_name: ${{ inputs.aws_chained_session_name }}
+
+  - name: Run Claude Code via AWS Bedrock
+    id: claude-code-via-aws-bedrock
+    if: ${{ inputs.provider == 'aws-bedrock' }}
+    uses: anthropics/claude-code-action@v1
+    with:
+      github_token: ${{ inputs.token }}
+      use_bedrock: "true"
+
+      prompt: ${{ inputs.prompt }}
+      settings: ${{ inputs.settings }}
+      claude_args: ${{ inputs.claude_args }}
+
+      additional_permissions: ${{ inputs.github_additional_permissions }}
+      use_sticky_comment: ${{ inputs.github_use_sticky_comment }}
+      track_progress: ${{ inputs.github_track_progress }}
