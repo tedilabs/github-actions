@@ -5,7 +5,8 @@ description: Install and set up development tools with mise.
 inputs:
   mise_version:
     required: false
-    description: "(Optional) The version of mise to install. Defaults to the latest release if omitted."
+    default: v2026.9.2
+    description: "(Optional) The version of mise to install. Pinned by default because resolving `latest` can point to a version whose release assets are not published yet. Defaults to `v2026.9.2`."
   mise_checksum:
     required: false
     description: "(Optional) The SHA256 checksum used to verify the downloaded mise binary."
