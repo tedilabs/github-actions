@@ -1,0 +1,33 @@
+name: Terraform - Validate
+description: Initialize a Terraform directory without a backend and validate it with `terraform validate`. Requires the `terraform` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to initialize and validate. Defaults to `./`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Terraform Init
+    id: init
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      terraform -chdir="$TARGET_DIR" init \
+        -backend=false \
+        -input=false \
+        -no-color
+
+  - name: Terraform Validate
+    id: validate
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      terraform -chdir="$TARGET_DIR" validate -no-color
