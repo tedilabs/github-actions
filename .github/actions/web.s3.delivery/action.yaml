@@ -1,0 +1,212 @@
+name: Web - Delivery to S3
+description: Upload web build artifacts to AWS S3 with pattern-based Cache-Control and Content-Type rules.
+
+
+inputs:
+  aws_region:
+    required: false
+    description: "(Optional) The region of the AWS."
+  aws_access_key_id:
+    required: false
+    description: "(Optional) The access key ID used to authenticate to the AWS."
+  aws_secret_access_key:
+    required: false
+    description: "(Optional) The secret access key used to authenticate to the AWS."
+  aws_github_oidc_iam_role:
+    required: false
+    description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate."
+  aws_github_oidc_session_name:
+    required: false
+    default: GitHubActions
+    description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+  aws_github_oidc_audience:
+    required: false
+    default: sts.amazonaws.com
+    description: "(Optional) The OIDC audience to be specified when the JWT is created. Defaults to `sts.amazonaws.com`. This will work for most cases. Changing the default audience may be necessary when using non-default AWS partitions, such as China regions."
+  aws_chained_iam_role:
+    required: false
+    description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
+  aws_chained_session_name:
+    required: false
+    default: GitHubActions
+    description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
+
+  source:
+    required: true
+    description: "(Required) The local directory containing the build artifacts to be uploaded to S3."
+  source_ignore:
+    required: false
+    default: ""
+    description: "(Optional) A newline-separated list of ignore patterns for files/directories in the source directory that should be excluded from upload. The ignore patterns should follow the syntax of `.gitignore` files. Following patterns are always ignored and do not need to be specified in this input: `.git/`, `.github/`, `.gitignore`, `.gitattributes`, `.editorconfig`, `README.md`, `README`, `LICENSE`, `LICENSE.md`, `CHANGELOG.md`."
+  aws_s3_bucket_name:
+    required: true
+    description: "(Required) The name of the S3 bucket to upload the build artifacts to. This bucket should be created in the AWS account beforehand. The bucket name must be globally unique across all AWS accounts."
+  aws_s3_bucket_key_prefix:
+    required: false
+    default: ""
+    description: |
+      (Optional) The prefix for the S3 bucket key where the build artifacts will be uploaded.
+      This can be used to organize files within the bucket.
+      Supported placeholders:
+      - <pr-number>: Pull request number
+      - <source-branch>: Source branch name (e.g., `feature-branch`)
+      - <target-branch>: Target branch name (e.g., `main`)
+      - <ref-name>: Reference name (e.g., `pr-123`, `main`, `v1.0.0`)
+      - <sha>: Full commit SHA
+      - <short-sha>: Short commit SHA (7 chars)
+      - <repo-name>: Repository name
+      - <owner>: Repository owner
+      Example: `previews/<pr-number>/` or `branch/<source-branch>/`
+
+  default_upload_rule:
+    required: false
+    default: '{ "cache_control": "public, max-age=300, s-maxage=86400, must-revalidate" }'
+    description: |
+      (Optional) A YAML/JSON object describing the fallback rule applied to files that
+      match none of the `upload_rules` patterns. Currently supported property:
+      - cache_control (required): the `Cache-Control` header value.
+      `content_type` is intentionally NOT supported here: the default rule applies
+      to an arbitrary mix of unmatched file types, so Content-Type is always
+      auto-detected per file (with `; charset=utf-8` appended for text-like types).
+      The default value is fail-safe for mutable entry files (e.g. loaders like
+      `widget.js`, `manifest.json`): browsers revalidate within 5 minutes while
+      CloudFront may cache at the edge for a day (`s-maxage`), which remains
+      controllable via invalidation.
+  upload_rules:
+    required: false
+    default: ""
+    description: |
+      (Optional) An ordered YAML (or JSON, a subset of YAML) array of upload rules.
+      Each file is matched against the rules top-to-bottom and the FIRST matching
+      rule wins (CloudFront behavior semantics). Files matching no rule fall back to
+      `default_upload_rule`.
+      Each rule is an object:
+      - pattern (required): gitignore-style glob (same syntax as `source_ignore`).
+        A pattern without `/` matches at any depth (e.g. `*.html`).
+      - cache_control (required): the `Cache-Control` header value.
+      - content_type (optional): overrides the automatically detected `Content-Type`.
+      Example (YAML):
+        - pattern: "assets/**"
+          cache_control: "public, max-age=31536000, immutable"
+        - pattern: "*.html"
+          cache_control: "no-cache"
+      Note: quote glob patterns like `"*.html"` — an unquoted leading `*` is a YAML
+      alias indicator and fails to parse.
+  delete_stale_objects:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to delete objects in the S3 destination that are not present in the source directory. Deletion runs after all uploads complete and is performed via explicit `s3api delete-objects` calls, so it never re-uploads files with stripped headers. Defaults to `true`."
+  delete_exclude_patterns:
+    required: false
+    default: ""
+    description: |
+      (Optional) A newline-separated list of gitignore-style patterns. Stale objects
+      matching these patterns are NOT deleted. Useful for retaining previous
+      content-hashed assets that may still be referenced by cached HTML in
+      browsers or at the CDN edge (prevents ChunkLoadError during rollouts).
+      Example: `assets/**`
+
+outputs:
+  source_ignore:
+    value: ${{ steps.prepare-source-dir.outputs.source_ignore }}
+    description: "The list of ignore patterns used when preparing the source directory, including both the default ignore patterns and the patterns provided in the `source_ignore` input."
+  destination:
+    value: ${{ steps.upload-artifacts.outputs.destination }}
+    description: "The S3 URI of the destination where the build artifacts were uploaded. For example, `s3://my-bucket/path/to/artifacts`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Render Templates
+    id: render-templates
+    uses: tedilabs/github-actions/.github/actions/misc.string-interpolation@main
+    with:
+      inputs: |
+        {
+          "aws_s3_bucket_key_prefix": "${{ inputs.aws_s3_bucket_key_prefix }}"
+        }
+
+  - name: Configure AWS Credentials
+    id: configure-aws-credentials
+    uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
+    with:
+      aws_region: ${{ inputs.aws_region }}
+      aws_access_key_id: ${{ inputs.aws_access_key_id }}
+      aws_secret_access_key: ${{ inputs.aws_secret_access_key }}
+      aws_github_oidc_iam_role: ${{ inputs.aws_github_oidc_iam_role }}
+      aws_github_oidc_session_name: ${{ inputs.aws_github_oidc_session_name }}
+      aws_github_oidc_audience: ${{ inputs.aws_github_oidc_audience }}
+      aws_chained_iam_role: ${{ inputs.aws_chained_iam_role }}
+      aws_chained_session_name: ${{ inputs.aws_chained_session_name }}
+
+  - name: Prepare Source Directory
+    id: prepare-source-dir
+    shell: bash
+    env:
+      SOURCE: ${{ inputs.source }}
+      SOURCE_IGNORE: ${{ inputs.source_ignore }}
+    run: |
+      TEMP_DIR=$(mktemp -d)
+      SOURCE_DIR=$(mktemp -d)
+
+      cp -R "${SOURCE}/." "${TEMP_DIR}/"
+
+      pushd "${TEMP_DIR}"
+
+      {
+        printf '%s\n' \
+          '.git/' \
+          '.github/' \
+          '.gitignore' \
+          '.gitattributes' \
+          '.editorconfig' \
+          'README.md' \
+          'README' \
+          'LICENSE' \
+          'LICENSE.md' \
+          'CHANGELOG.md'
+        printf '%s\n' "${SOURCE_IGNORE}"
+      } > .gitignore
+
+      rm -rf .git
+      git init -q
+      git add .
+      cat .gitignore
+      git ls-files -z | tar cf - --null -T - | tar xf - -C "${SOURCE_DIR}"
+
+      popd
+
+      echo "source_dir=${SOURCE_DIR}" >> "$GITHUB_OUTPUT"
+
+      {
+        echo "source_ignore<<SOURCE_IGNORE_EOF"
+        cat "${TEMP_DIR}/.gitignore"
+        echo "SOURCE_IGNORE_EOF"
+      } >> "$GITHUB_OUTPUT"
+
+  - name: Install Dependencies
+    shell: bash
+    run: python3 -m pip install --user --quiet 'pathspec==1.1.1' 'pyyaml==6.0.2'
+
+  - name: Upload Artifacts to S3
+    id: upload-artifacts
+    shell: bash
+    env:
+      UPLOAD_SOURCE: ${{ steps.prepare-source-dir.outputs.source_dir }}
+      UPLOAD_DESTINATION: "s3://${{ inputs.aws_s3_bucket_name }}/${{ fromJSON(steps.render-templates.outputs.interpolated).aws_s3_bucket_key_prefix }}"
+      DEFAULT_UPLOAD_RULE: ${{ inputs.default_upload_rule }}
+      UPLOAD_RULES: ${{ inputs.upload_rules }}
+      DELETE_STALE_OBJECTS: ${{ inputs.delete_stale_objects }}
+      DELETE_EXCLUDE_PATTERNS: ${{ inputs.delete_exclude_patterns }}
+      META_REPOSITORY: ${{ github.repository }}
+      META_AUTHOR: ${{ github.actor }}
+      META_BRANCH: ${{ env.SOURCE_BRANCH }}
+      META_SHA: ${{ github.sha }}
+    run: |
+      export UPLOAD_METADATA="github-repository=${META_REPOSITORY},github-author=${META_AUTHOR},git-branch=${META_BRANCH},git-sha=${META_SHA},deployed-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      python3 "${GITHUB_ACTION_PATH}/scripts/upload.py"
+
+      echo "destination=${UPLOAD_DESTINATION}" >> "$GITHUB_OUTPUT"
