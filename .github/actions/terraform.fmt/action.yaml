@@ -1,0 +1,32 @@
+name: Terraform - Format
+description: Check that Terraform files are formatted with `terraform fmt`. Requires the `terraform` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to check formatting in. Defaults to `./`."
+  recursive:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to also check subdirectories. Defaults to `true`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Check Terraform Format
+    id: fmt
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      RECURSIVE: ${{ inputs.recursive }}
+    run: |
+      args=(-check -diff -no-color)
+      if [ "$RECURSIVE" = "true" ]; then
+        args+=(-recursive)
+      fi
+
+      terraform -chdir="$TARGET_DIR" fmt "${args[@]}"
