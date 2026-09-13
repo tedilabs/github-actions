@@ -1,0 +1,67 @@
+name: Terraform - TFLint
+description: Lint a Terraform directory with `tflint`. Requires the `tflint` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to lint. Defaults to `./`."
+  config_file:
+    required: false
+    default: .tflint.hcl
+    description: "(Optional) The path to the `tflint` config file, relative to the repository root. Defaults to `.tflint.hcl`."
+  minimum_failure_severity:
+    required: false
+    default: warning
+    description: "(Optional) The minimum severity that fails the step. Valid values are `error`, `warning`, or `notice`. Defaults to `warning`."
+  format:
+    required: false
+    default: compact
+    description: "(Optional) The output format of `tflint`. Defaults to `compact`."
+  cache:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to cache the installed `tflint` plugins (`~/.tflint.d/plugins`), keyed by the content of the config file. Defaults to `true`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used by `tflint --init` to download plugins from GitHub without hitting the anonymous rate limit. Defaults to the automatically generated `github.token`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Cache TFLint Plugins
+    id: cache
+    if: inputs.cache == 'true'
+    uses: actions/cache@v4
+    with:
+      path: ~/.tflint.d/plugins
+      key: tflint-plugins-${{ runner.os }}-${{ hashFiles(inputs.config_file) }}
+
+  - name: Init TFLint
+    id: init
+    shell: bash
+    env:
+      GITHUB_TOKEN: ${{ inputs.github_token }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+    run: |
+      tflint --version
+      tflint --init --config "$(realpath "$CONFIG_FILE")"
+
+  - name: Run TFLint
+    id: tflint
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+      MINIMUM_FAILURE_SEVERITY: ${{ inputs.minimum_failure_severity }}
+      FORMAT: ${{ inputs.format }}
+    run: |
+      tflint \
+        --chdir "$TARGET_DIR" \
+        --config "$(realpath "$CONFIG_FILE")" \
+        --format "$FORMAT" \
+        --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY"
