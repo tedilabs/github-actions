@@ -1,0 +1,181 @@
+name: Web - Delivery
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      aws_region:
+        type: string
+        required: false
+        description: "(Optional) The AWS region where the S3 bucket is located."
+      aws_github_oidc_audience:
+        type: string
+        required: false
+        default: sts.amazonaws.com
+        description: "(Optional) The OIDC audience to be specified when the JWT is created. Defaults to `sts.amazonaws.com`. This will work for most cases. Changing the default audience may be necessary when using non-default AWS partitions, such as China regions."
+      aws_github_oidc_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+      aws_chained_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
+      aws_s3_bucket_name:
+        type: string
+        required: true
+        description: "(Required) The name of the S3 bucket to upload the built artifacts to. This bucket should be created in the AWS account beforehand. The bucket name must be globally unique across all AWS accounts."
+      aws_s3_bucket_key_prefix:
+        type: string
+        required: false
+        default: ""
+        description: |
+          (Optional) The prefix for the S3 bucket key where the built artifacts will be uploaded.
+          This can be used to organize files within the bucket.
+          Supported placeholders:
+          - <pr-number>: Pull request number
+          - <source-branch>: Source branch name (e.g., `feature-branch`)
+          - <target-branch>: Target branch name (e.g., `main`)
+          - <ref-name>: Reference name (e.g., `pr-123`, `main`, `v1.0.0`)
+          - <sha>: Full commit SHA
+          - <short-sha>: Short commit SHA (7 chars)
+          - <repo-name>: Repository name
+          - <owner>: Repository owner
+          Example: `previews/<pr-number>/` or `branch/<source-branch>/`
+      source:
+        type: string
+        required: false
+        default: "./"
+        description: "(Optional) The source directory containing the files to be uploaded to S3. Defaults to `./`, which means the root of the repository. You can specify a subdirectory if needed, for example `build/`."
+      source_ignore:
+        type: string
+        required: false
+        default: ""
+        description: "(Optional) A newline-separated list of ignore patterns for files/directories in the source directory that should be excluded from upload. The ignore patterns should follow the syntax of `.gitignore` files. Following patterns are always ignored and do not need to be specified in this input: `.git/`, `.github/`, `.gitignore`, `.gitattributes`, `.editorconfig`, `README.md`, `README`, `LICENSE`, `LICENSE.md`, `CHANGELOG.md`."
+      build_enabled:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether the artifacts to upload live in `build/` instead of the `source` input. Defaults to `false`. This workflow does NOT run a build — the caller is responsible for producing the directory before calling. Setting this to `true` is equivalent to passing `source: build/`."
+      default_upload_rule:
+        type: string
+        required: false
+        default: ""
+        description: |
+          (Optional) A YAML/JSON object describing the fallback rule applied to files that
+          match none of the `upload_rules` patterns. Currently supported property:
+          - cache_control (required): the `Cache-Control` header value.
+          Leave empty to use the action default, which is fail-safe for mutable entry
+          files (browsers revalidate within 5 minutes while CloudFront may cache at the
+          edge for a day).
+      upload_rules:
+        type: string
+        required: false
+        default: ""
+        description: |
+          (Optional) An ordered YAML (or JSON) array of upload rules. Each file is matched
+          against the rules top-to-bottom and the FIRST matching rule wins (CloudFront
+          behavior semantics). Files matching no rule fall back to `default_upload_rule`.
+          Each rule is an object:
+          - pattern (required): gitignore-style glob (same syntax as `source_ignore`).
+            A pattern without `/` matches at any depth (e.g. `*.html`).
+          - cache_control (required): the `Cache-Control` header value.
+          - content_type (optional): overrides the automatically detected `Content-Type`.
+          Example (YAML):
+            - pattern: "assets/**"
+              cache_control: "public, max-age=31536000, immutable"
+            - pattern: "*.html"
+              cache_control: "no-cache"
+          Note: quote glob patterns like `"*.html"` — an unquoted leading `*` is a YAML
+          alias indicator and fails to parse.
+      delete_stale_objects:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to delete objects in the S3 destination that are not present in the source directory. Deletion runs after all uploads complete. Defaults to `true`."
+      delete_exclude_patterns:
+        type: string
+        required: false
+        default: ""
+        description: |
+          (Optional) A newline-separated list of gitignore-style patterns. Stale objects
+          matching these patterns are NOT deleted. Useful for retaining previous
+          content-hashed assets that may still be referenced by cached HTML in
+          browsers or at the CDN edge (prevents ChunkLoadError during rollouts).
+          Example: `assets/**`
+
+    secrets:
+      aws_access_key_id:
+        required: false
+        description: "(Optional) The access key ID used to authenticate to the AWS account."
+      aws_secret_access_key:
+        required: false
+        description: "(Optional) The secret access key used to authenticate to the AWS account."
+      aws_github_oidc_iam_role:
+        required: false
+        description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate to the AWS account."
+      aws_chained_iam_role:
+        required: false
+        description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+    outputs:
+      destination:
+        value: ${{ jobs.delivery.outputs.destination }}
+        description: "The S3 URI where the artifacts were uploaded to. For example, `s3://my-bucket/path/to/artifacts/`."
+      source_ignore:
+        value: ${{ jobs.delivery.outputs.source_ignore }}
+        description: "The list of ignore patterns used when preparing the source directory, including both the default patterns and the patterns provided in the `source_ignore` input."
+
+jobs:
+  delivery:
+    name: Build and Upload Artifacts to AWS S3
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 1
+
+    - name: Delivery to S3
+      id: delivery-to-s3
+      uses: tedilabs/github-actions/.github/actions/web.s3.delivery@main
+      with:
+        aws_region: ${{ inputs.aws_region }}
+        aws_access_key_id: ${{ secrets.aws_access_key_id }}
+        aws_secret_access_key: ${{ secrets.aws_secret_access_key }}
+        aws_github_oidc_iam_role: ${{ secrets.aws_github_oidc_iam_role }}
+        aws_github_oidc_session_name: ${{ inputs.aws_github_oidc_session_name }}
+        aws_github_oidc_audience: ${{ inputs.aws_github_oidc_audience }}
+        aws_chained_iam_role: ${{ secrets.aws_chained_iam_role }}
+        aws_chained_session_name: ${{ inputs.aws_chained_session_name }}
+
+        aws_s3_bucket_name: ${{ inputs.aws_s3_bucket_name }}
+        aws_s3_bucket_key_prefix: ${{ inputs.aws_s3_bucket_key_prefix }}
+
+        source: ${{ inputs.build_enabled && 'build/' || inputs.source }}
+        source_ignore: ${{ inputs.source_ignore }}
+
+        default_upload_rule: ${{ inputs.default_upload_rule }}
+        upload_rules: ${{ inputs.upload_rules }}
+        delete_stale_objects: ${{ inputs.delete_stale_objects && 'true' || 'false' }}
+        delete_exclude_patterns: ${{ inputs.delete_exclude_patterns }}
+
+    outputs:
+      destination: ${{ steps.delivery-to-s3.outputs.destination }}
+      source_ignore: ${{ steps.delivery-to-s3.outputs.source_ignore }}

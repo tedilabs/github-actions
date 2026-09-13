@@ -1,0 +1,112 @@
+name: Web - Set Version
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      aws_region:
+        type: string
+        required: false
+        description: "(Optional) The AWS region where the S3 bucket is located."
+      aws_github_oidc_audience:
+        type: string
+        required: false
+        default: sts.amazonaws.com
+        description: "(Optional) The OIDC audience to be specified when the JWT is created. Defaults to `sts.amazonaws.com`. This will work for most cases. Changing the default audience may be necessary when using non-default AWS partitions, such as China regions."
+      aws_github_oidc_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+
+      version:
+        type: string
+        required: true
+        description: |
+          (Required) The version string to set in CloudFront Key-Value Store. This can be used to indicate the version of the web application to serve.
+          Supported placeholders:
+          - <pr-number>: Pull request number
+          - <source-branch>: Source branch name (e.g., `feature-branch`)
+          - <target-branch>: Target branch name (e.g., `main`)
+          - <ref-name>: Reference name (e.g., `pr-123`, `main`, `v1.0.0`)
+          - <sha>: Full commit SHA
+          - <short-sha>: Short commit SHA (7 chars)
+          - <repo-name>: Repository name
+          - <owner>: Repository owner
+      version_key:
+        type: string
+        required: false
+        default: "version"
+        description: "(Optional) The key in CloudFront Key-Value Store to set the version value to. Defaults to `version`."
+      previous_version_key:
+        type: string
+        required: false
+        default: "previous_version"
+        description: "(Optional) The key in CloudFront Key-Value Store to set the previous version value to during rotation. Defaults to `previous_version`. This is used together with `version_key` to perform atomic update of the current and previous version in CloudFront Key-Value Store, which can be helpful for rollback purposes."
+      aws_cloudfront_kvs_arn:
+        type: string
+        required: true
+        description: "(Required) The ARN of the CloudFront Key-Value Store where the version information will be stored. The action will perform atomic update of the current version and previous version (if `previous_version_key` is specified) in the CloudFront Key-Value Store, which can be helpful for rollback purposes."
+
+    secrets:
+      aws_access_key_id:
+        required: false
+        description: "(Optional) The access key ID used to authenticate to the AWS account."
+      aws_secret_access_key:
+        required: false
+        description: "(Optional) The secret access key used to authenticate to the AWS account."
+      aws_github_oidc_iam_role:
+        required: false
+        description: "(Optional) The ARN (Amazon Resource Name) of the IAM role to assume via GitHub OIDC to authenticate to the AWS account."
+      aws_chained_iam_role:
+        required: false
+        description: "(Optional) The ARN of the chained IAM role to assume after assuming the GitHub OIDC IAM role or after configuring AWS credentials with access key and secret access key."
+      token:
+        required: false
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+
+    outputs:
+      version:
+        value: ${{ jobs.set-version.outputs.version }}
+        description: "The new version that has been set in CloudFront Key-Value Store"
+      previous_version:
+        value: ${{ jobs.set-version.outputs.previous_version }}
+        description: "Previous version before this deployment"
+
+jobs:
+  set-version:
+    name: Set the version in CloudFront Key-Value Store
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Set Version in CloudFront Key-Value Store
+      id: set-version
+      uses: tedilabs/github-actions/.github/actions/web.cloudfront-kvs.set-version@main
+      with:
+        version: ${{ inputs.version }}
+        version_key: ${{ inputs.version_key }}
+        previous_version_key: ${{ inputs.previous_version_key }}
+
+        aws_cloudfront_kvs_arn: ${{ inputs.aws_cloudfront_kvs_arn }}
+
+        aws_region: us-east-1
+        aws_access_key_id: ${{ secrets.aws_access_key_id }}
+        aws_secret_access_key: ${{ secrets.aws_secret_access_key }}
+        aws_github_oidc_iam_role: ${{ secrets.aws_github_oidc_iam_role }}
+        aws_github_oidc_session_name: ${{ inputs.aws_github_oidc_session_name }}
+        aws_github_oidc_audience: ${{ inputs.aws_github_oidc_audience }}
+        aws_chained_iam_role: ${{ secrets.aws_chained_iam_role }}
+        aws_chained_session_name: ${{ inputs.aws_chained_session_name }}
+
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      previous_version: ${{ steps.set-version.outputs.previous_version }}
