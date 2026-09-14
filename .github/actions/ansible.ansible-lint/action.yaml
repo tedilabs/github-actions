@@ -1,0 +1,66 @@
+name: Ansible - ansible-lint
+description: Lint Ansible playbooks and roles with `ansible-lint`. On failure, the findings are added to the job summary. Requires the `ansible-lint` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Ansible project directory to lint, where `.ansible-lint` and `ansible.cfg` live. Defaults to `./`."
+  requirements_file:
+    required: false
+    description: "(Optional) The path to a Galaxy requirements file, relative to the repository root (e.g. `ansible/requirements.yaml`). When set, its collections are installed outside the checkout and exposed to `ansible-lint` through `ANSIBLE_COLLECTIONS_PATH`, so they are resolvable but never linted. When omitted, `ansible-lint` installs a `requirements.yml` found in the project directory on its own."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Install Galaxy Collections
+    id: install-collections
+    if: inputs.requirements_file != ''
+    shell: bash
+    env:
+      REQUIREMENTS_FILE: ${{ inputs.requirements_file }}
+    run: |
+      collections_path="$RUNNER_TEMP/ansible/collections"
+
+      # Restrict the search path so collections already present elsewhere on the runner are not skipped.
+      ANSIBLE_COLLECTIONS_PATH="$collections_path" \
+        ansible-galaxy collection install -r "$REQUIREMENTS_FILE" -p "$collections_path" 2>&1 | tee "$RUNNER_TEMP/ansible-galaxy.log"
+      echo "collections_path=$collections_path" >> "$GITHUB_OUTPUT"
+
+  - name: Add Failure Details to Job Summary
+    id: install-collections-summary
+    if: steps.install-collections.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ ansible-galaxy collection install · ${{ inputs.requirements_file }}"
+      file: ${{ runner.temp }}/ansible-galaxy.log
+      lang: text
+
+  - name: Run ansible-lint
+    id: ansible-lint
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      COLLECTIONS_PATH: ${{ steps.install-collections.outputs.collections_path }}
+    run: |
+      if [ -n "$COLLECTIONS_PATH" ]; then
+        export ANSIBLE_COLLECTIONS_PATH="$COLLECTIONS_PATH"
+      fi
+
+      # Run inside the project so `.ansible-lint`, `ansible.cfg`, and relative `roles_path` resolve against it.
+      # Under GitHub Actions, `ansible-lint` emits workflow annotations on its own.
+      cd "$TARGET_DIR"
+      ansible-lint --version
+      ansible-lint --nocolor 2>&1 | tee "$RUNNER_TEMP/ansible-lint.log"
+
+  - name: Add Failure Details to Job Summary
+    id: ansible-lint-summary
+    if: steps.ansible-lint.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ ansible-lint · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/ansible-lint.log
+      lang: text
