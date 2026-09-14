@@ -7,6 +7,9 @@ inputs:
     required: false
     default: ./
     description: "(Optional) The directory to initialize and validate. Defaults to `./`."
+  workspace:
+    required: false
+    description: "(Optional) The Terraform workspace name to validate as, exported as `TF_WORKSPACE`. Needed when the configuration references `terraform.workspace` (e.g. to locate `<workspace>/config.yaml`). Defaults to Terraform's `default` workspace."
 
 
 runs:
@@ -18,7 +21,12 @@ runs:
     shell: bash
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
     run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
       terraform -chdir="$TARGET_DIR" init \
         -backend=false \
         -input=false \
@@ -29,5 +37,10 @@ runs:
     shell: bash
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
     run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
       terraform -chdir="$TARGET_DIR" validate -no-color
