@@ -1,0 +1,30 @@
+name: GitHub Actions
+
+
+on:
+  push:
+    branches:
+    - main
+    paths:
+    - ".github/**"
+
+  pull_request:
+    paths:
+    - ".github/**"
+
+  workflow_dispatch: {}
+
+
+concurrency:
+  group: github-actions-${{ github.ref }}
+  cancel-in-progress: true
+
+
+jobs:
+  integration:
+    name: Integration
+    uses: tedilabs/github-actions/.github/workflows/github-actions.integration.yaml@main
+
+    permissions:
+      contents: read
+      pull-requests: write
