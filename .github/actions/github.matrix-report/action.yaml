@@ -1,0 +1,189 @@
+name: GitHub - Matrix Report
+description: Collect per-job check results across a matrix and publish them as one table in the job summary and, on pull requests, as a single sticky comment.
+
+
+inputs:
+  mode:
+    required: true
+    description: "(Required) `collect` records the results of the current matrix job and uploads them as an artifact. `publish` downloads every collected result and renders the report. Run `publish` in a job that `needs` the matrix job with `if: always()`."
+  id:
+    required: false
+    description: "(Required in `collect` mode) The label of this matrix job's row (e.g. `modules/foo` or `account/iam / master`)."
+  id_label:
+    required: false
+    default: Target
+    description: "(Optional) The header of the first column. Defaults to `Target`."
+  results:
+    required: false
+    description: "(Required in `collect` mode) A JSON object mapping each check name to its step outcome, e.g. `{\"fmt\": \"success\", \"tflint\": \"failure\"}`. Key order defines the column order. Values are usually `steps.<id>.outcome`: `success`, `failure`, `skipped`, or `cancelled`."
+  job_status:
+    required: false
+    description: "(Optional, `collect` mode) The current job status, usually `${{ job.status }}`. When it is `failure` while no check failed (e.g. a setup step failed), the row is flagged as failed."
+  fail_on_failure:
+    required: false
+    default: "true"
+    description: "(Optional, `collect` mode) Whether to fail the step, and therefore the job, when any result is `failure`. Use this when the check steps run with `continue-on-error: true`. Defaults to `true`."
+  artifact_prefix:
+    required: false
+    default: matrix-report
+    description: "(Optional) The prefix of the result artifacts. Use a distinct prefix per report when a workflow publishes more than one. Defaults to `matrix-report`."
+  title:
+    required: false
+    default: Report
+    description: "(Optional, `publish` mode) The heading of the report. Defaults to `Report`."
+  pr_comment_enabled:
+    required: false
+    default: "true"
+    description: "(Optional, `publish` mode) Whether to post the report as a sticky comment on the pull request. Only applies to `pull_request` events and requires the `pull-requests: write` permission. Defaults to `true`."
+  pr_comment_marker:
+    required: false
+    default: matrix-report
+    description: "(Optional, `publish` mode) The hidden marker that identifies the sticky comment. Defaults to `matrix-report`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional, `publish` mode) The GitHub token used to post the comment. Defaults to the automatically generated `github.token`."
+
+outputs:
+  report:
+    value: ${{ steps.render.outputs.report }}
+    description: "(`publish` mode) The rendered Markdown report."
+  total:
+    value: ${{ steps.render.outputs.total }}
+    description: "(`publish` mode) The number of collected rows."
+  failed:
+    value: ${{ steps.render.outputs.failed }}
+    description: "(`publish` mode) The number of rows with at least one failure."
+
+
+runs:
+  using: composite
+
+  steps:
+  # ---- collect ----
+  - name: Collect Result
+    id: collect
+    if: inputs.mode == 'collect'
+    shell: bash
+    env:
+      ID: ${{ inputs.id }}
+      ID_LABEL: ${{ inputs.id_label }}
+      RESULTS: ${{ inputs.results }}
+      JOB_STATUS: ${{ inputs.job_status }}
+    run: |
+      if [ -z "$ID" ] || ! jq -e 'type == "object" and length > 0' <<< "$RESULTS" >/dev/null 2>&1; then
+        echo "::error::Inputs 'id' and 'results' (a non-empty JSON object) are required in collect mode."
+        exit 1
+      fi
+
+      # Artifact names cannot contain path separators or most punctuation, so derive a safe unique key.
+      key="$(printf '%s' "$ID" | tr -c 'A-Za-z0-9._-' '-')-$(printf '%s' "$ID" | shasum | cut -c1-8)"
+      dir="$RUNNER_TEMP/matrix-report"
+      mkdir -p "$dir"
+      jq -n --arg id "$ID" --arg job_status "$JOB_STATUS" --argjson results "$RESULTS" \
+        '{id: $id, job_status: $job_status, results: $results}' > "$dir/$key.json"
+
+      {
+        echo "| $ID_LABEL | $(jq -r 'keys_unsorted | join(" | ")' <<< "$RESULTS") |"
+        echo "|---|$(jq -r 'keys_unsorted | map(":-:") | join("|")' <<< "$RESULTS")|"
+        echo "| $ID | $(jq -r 'def icon: {success: "✅", failure: "❌", skipped: "⏭️", cancelled: "⚠️"}[.] // .; [.[]] | map(icon) | join(" | ")' <<< "$RESULTS") |"
+        echo
+      } >> "$GITHUB_STEP_SUMMARY"
+
+      echo "key=$key" >> "$GITHUB_OUTPUT"
+
+  - name: Upload Result
+    id: upload
+    if: inputs.mode == 'collect'
+    uses: actions/upload-artifact@v7
+    with:
+      name: ${{ inputs.artifact_prefix }}-${{ steps.collect.outputs.key }}
+      path: ${{ runner.temp }}/matrix-report/${{ steps.collect.outputs.key }}.json
+      retention-days: 1
+      if-no-files-found: error
+
+  - name: Fail on Failure
+    id: fail
+    if: inputs.mode == 'collect' && inputs.fail_on_failure == 'true'
+    shell: bash
+    env:
+      RESULTS: ${{ inputs.results }}
+    run: |
+      failed="$(jq -r 'to_entries | map(select(.value == "failure") | .key) | join(", ")' <<< "$RESULTS")"
+      if [ -n "$failed" ]; then
+        echo "::error::Failed checks: $failed"
+        exit 1
+      fi
+
+  # ---- publish ----
+  - name: Download Results
+    id: download
+    if: inputs.mode == 'publish'
+    uses: actions/download-artifact@v8
+    continue-on-error: true
+    with:
+      pattern: ${{ inputs.artifact_prefix }}-*
+      path: ${{ runner.temp }}/matrix-report
+      merge-multiple: "true"
+
+  - name: Render Report
+    id: render
+    if: inputs.mode == 'publish'
+    shell: bash
+    env:
+      ID_LABEL: ${{ inputs.id_label }}
+      TITLE: ${{ inputs.title }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    run: |
+      dir="$RUNNER_TEMP/matrix-report"
+      shopt -s nullglob
+      files=("$dir"/*.json)
+      total="${#files[@]}"
+      report="$RUNNER_TEMP/matrix-report.md"
+
+      if [ "$total" -eq 0 ]; then
+        failed=0
+        printf '### %s\n\nNo results were collected.\n' "$TITLE" > "$report"
+      else
+        failed="$(jq -s 'map(select((.results | map(. == "failure") | any) or .job_status == "failure")) | length' "${files[@]}")"
+        table="$(jq -s -r --arg label "$ID_LABEL" '
+          def icon: {success: "✅", failure: "❌", skipped: "⏭️", cancelled: "⚠️"}[.] // .;
+          sort_by(.id) as $rows
+          | ($rows[0].results | keys_unsorted) as $first
+          | ($rows | map(.results | keys_unsorted) | add | unique) as $all
+          | ($first + ($all - $first)) as $cols
+          | "| \($label) | \($cols | join(" | ")) |",
+            "|---|\($cols | map(":-:") | join("|"))|",
+            ($rows[]
+              | (if .job_status == "failure" and ((.results | map(. == "failure") | any) | not) then "⚠️ " else "" end) as $flag
+              | "| \($flag)\(.id) | \([$cols[] as $c | (.results[$c] // "-") | icon] | join(" | ")) |")
+        ' "${files[@]}")"
+
+        if [ "$failed" -eq 0 ]; then
+          footer="✅ All $total passed."
+        else
+          footer="❌ $failed of $total failed · see the [run summary]($RUN_URL) for details."
+        fi
+        printf '### %s\n\n%s\n\n%s\n' "$TITLE" "$table" "$footer" > "$report"
+      fi
+
+      cat "$report" >> "$GITHUB_STEP_SUMMARY"
+      {
+        echo "report<<MATRIX_REPORT_EOF"
+        cat "$report"
+        echo "MATRIX_REPORT_EOF"
+        echo "total=$total"
+        echo "failed=$failed"
+      } >> "$GITHUB_OUTPUT"
+
+  # Forks run with a read-only token, so a failed comment must not fail the report.
+  - name: Comment on Pull Request
+    id: comment
+    if: inputs.mode == 'publish' && inputs.pr_comment_enabled == 'true' && github.event_name == 'pull_request' && steps.render.outputs.total != '0'
+    uses: tedilabs/github-actions/.github/actions/github.pr.sticky-comment@main
+    continue-on-error: true
+    with:
+      marker: ${{ inputs.pr_comment_marker }}
+      body: ${{ steps.render.outputs.report }}
+      skip_if_unchanged: "true"
+      github_token: ${{ inputs.github_token }}
