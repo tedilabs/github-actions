@@ -1,0 +1,81 @@
+name: GitHub Actions - check-jsonschema
+description: Validate GitHub Actions workflow files and action metadata files (`action.yml`, `action.yaml`) against the SchemaStore schemas with `check-jsonschema`. Unlike `actionlint`, this also covers composite actions. On failure, the findings are added to the job summary. Requires the `check-jsonschema` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The repository root to validate. Defaults to `./`."
+  validate_workflows:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to validate the workflow files in `.github/workflows`. Defaults to `true`."
+  validate_actions:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to validate every `action.yml` and `action.yaml` found under `target_dir`, excluding `.git` and `node_modules`. Defaults to `true`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Validate Workflows
+    id: validate-workflows
+    if: inputs.validate_workflows == 'true'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      cd "$TARGET_DIR" || exit 1
+      files=$(find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
+      if [ -z "$files" ]; then
+        echo "No workflow files found. Skipping."
+        exit 0
+      fi
+
+      check-jsonschema --version
+      echo "$files" | tr '\n' '\0' \
+        | xargs -0 check-jsonschema --builtin-schema vendor.github-workflows 2>&1 \
+        | tee "$RUNNER_TEMP/check-jsonschema-workflows.log"
+
+  - name: Add Failure Details to Job Summary
+    id: validate-workflows-summary
+    if: steps.validate-workflows.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ check-jsonschema (workflows) · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/check-jsonschema-workflows.log
+      lang: text
+
+  - name: Validate Actions
+    id: validate-actions
+    if: inputs.validate_actions == 'true'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      cd "$TARGET_DIR" || exit 1
+      files=$(
+        find . -path ./.git -prune -o -path '*/node_modules' -prune -o \
+          -type f \( -name action.yml -o -name action.yaml \) -print | sort
+      )
+      if [ -z "$files" ]; then
+        echo "No action metadata files found. Skipping."
+        exit 0
+      fi
+
+      check-jsonschema --version
+      echo "$files" | tr '\n' '\0' \
+        | xargs -0 check-jsonschema --builtin-schema vendor.github-actions 2>&1 \
+        | tee "$RUNNER_TEMP/check-jsonschema-actions.log"
+
+  - name: Add Failure Details to Job Summary
+    id: validate-actions-summary
+    if: steps.validate-actions.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ check-jsonschema (actions) · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/check-jsonschema-actions.log
+      lang: text
