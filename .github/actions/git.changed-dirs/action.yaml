@@ -1,0 +1,147 @@
+name: Git - Changed Directories
+description: Detect the directories changed by the current event and expose them as a JSON array for matrix jobs.
+
+
+inputs:
+  files:
+    required: false
+    description: "(Optional) File and directory patterns used to detect changes, one per line (e.g. `modules/**`). Defaults to the entire repository."
+  files_ignore:
+    required: false
+    description: "(Optional) File and directory patterns to ignore when detecting changes, one per line (e.g. `**/*.md`). Applied after `files`."
+  max_depth:
+    required: false
+    description: "(Optional) The maximum depth of the directories to output. For example, `modules/foo/bar.tf` with a max depth of `2` is reported as `modules/foo`. Defaults to no limit."
+  exclude_current_dir:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to exclude the repository root (reported as `.`) from the output when files at the root have changed. Defaults to `false`."
+  exclude_submodules:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to exclude changes inside git submodules. Defaults to `false`."
+  exclude_symlinks:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to exclude symlinks from the changed files. Defaults to `false`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used to fetch changed files from the GitHub API when the local git history is insufficient. Defaults to the automatically generated `github.token`."
+
+outputs:
+  # Derived outputs, intended for job matrices.
+  has_directories:
+    value: ${{ steps.filter.outputs.has_directories }}
+    description: "Whether `directories` is non-empty. `true` or `false`."
+  directories:
+    value: ${{ steps.filter.outputs.directories }}
+    description: "A JSON array of `all_modified_directories` minus the directories that no longer exist in the checkout, so the array can be used directly as a job matrix."
+
+  # Pass-through outputs of `tj-actions/changed-files` in directory mode. Each entry is a directory that
+  # contains at least one file with the given change type, so the same directory can appear in several lists
+  # (e.g. in `deleted_directories` and `modified_directories` when one file was deleted and another edited).
+  added_directories:
+    value: ${{ steps.changed-files.outputs.added_files }}
+    description: "A JSON array of the directories containing added files."
+  added_directories_count:
+    value: ${{ steps.changed-files.outputs.added_files_count }}
+    description: "The number of directories containing added files."
+  deleted_directories:
+    value: ${{ steps.changed-files.outputs.deleted_files }}
+    description: "A JSON array of the directories containing deleted files. These directories may or may not still exist; use `directories` for the ones that do."
+  deleted_directories_count:
+    value: ${{ steps.changed-files.outputs.deleted_files_count }}
+    description: "The number of directories containing deleted files."
+  modified_directories:
+    value: ${{ steps.changed-files.outputs.modified_files }}
+    description: "A JSON array of the directories containing modified files."
+  modified_directories_count:
+    value: ${{ steps.changed-files.outputs.modified_files_count }}
+    description: "The number of directories containing modified files."
+  renamed_directories:
+    value: ${{ steps.changed-files.outputs.renamed_files }}
+    description: "A JSON array of the directories containing renamed files, based on the new file paths."
+  renamed_directories_count:
+    value: ${{ steps.changed-files.outputs.renamed_files_count }}
+    description: "The number of directories containing renamed files."
+  all_changed_directories:
+    value: ${{ steps.changed-files.outputs.all_changed_files }}
+    description: "A JSON array of the directories containing added, copied, modified, or renamed files (ACMR). Directories with only deleted files are not included."
+  all_changed_directories_count:
+    value: ${{ steps.changed-files.outputs.all_changed_files_count }}
+    description: "The number of directories containing added, copied, modified, or renamed files (ACMR)."
+  all_modified_directories:
+    value: ${{ steps.changed-files.outputs.all_modified_files }}
+    description: "A JSON array of the directories containing added, copied, modified, renamed, or deleted files (ACMRD)."
+  all_modified_directories_count:
+    value: ${{ steps.changed-files.outputs.all_modified_files_count }}
+    description: "The number of directories containing added, copied, modified, renamed, or deleted files (ACMRD)."
+  any_added:
+    value: ${{ steps.changed-files.outputs.any_added }}
+    description: "Whether any file matching the patterns was added. `true` or `false`."
+  any_deleted:
+    value: ${{ steps.changed-files.outputs.any_deleted }}
+    description: "Whether any file matching the patterns was deleted. `true` or `false`."
+  any_changed:
+    value: ${{ steps.changed-files.outputs.any_changed }}
+    description: "Whether any file matching the patterns was added, copied, modified, or renamed (ACMR). `false` when only deletions happened. `true` or `false`."
+  any_modified:
+    value: ${{ steps.changed-files.outputs.any_modified }}
+    description: "Whether any file matching the patterns was added, copied, modified, renamed, or deleted (ACMRD). `true` or `false`."
+  only_changed:
+    value: ${{ steps.changed-files.outputs.only_changed }}
+    description: "Whether every changed file matches the patterns, considering added, copied, modified, or renamed files (ACMR). `true` or `false`."
+  only_modified:
+    value: ${{ steps.changed-files.outputs.only_modified }}
+    description: "Whether every changed file matches the patterns, considering added, copied, modified, renamed, or deleted files (ACMRD). `true` or `false`."
+  only_deleted:
+    value: ${{ steps.changed-files.outputs.only_deleted }}
+    description: "Whether every changed file matching the patterns was deleted. `true` or `false`."
+
+runs:
+  using: composite
+
+  steps:
+  # `matrix: true` outputs unescaped JSON usable with `fromJson()`.
+  # `all_modified_files` covers ACMRD so a module whose file was deleted is still re-checked.
+  - name: Get Changed Directories
+    id: changed-files
+    uses: tj-actions/changed-files@v47
+    with:
+      files: ${{ inputs.files }}
+      files_ignore: ${{ inputs.files_ignore }}
+      dir_names: "true"
+      dir_names_max_depth: ${{ inputs.max_depth }}
+      dir_names_exclude_current_dir: ${{ inputs.exclude_current_dir }}
+      exclude_submodules: ${{ inputs.exclude_submodules }}
+      exclude_symlinks: ${{ inputs.exclude_symlinks }}
+      token: ${{ inputs.github_token }}
+      matrix: "true"
+
+  - name: Filter Existing Directories
+    id: filter
+    shell: bash
+    env:
+      MODIFIED_DIRECTORIES: ${{ steps.changed-files.outputs.all_modified_files }}
+    run: |
+      # Drop directories removed entirely by this change; there is nothing left to check in them.
+      directories="[]"
+      while IFS= read -r dir; do
+        [ -z "$dir" ] && continue
+        if [ -d "$dir" ]; then
+          directories="$(jq -c --arg dir "$dir" '. + [$dir]' <<< "$directories")"
+        else
+          echo "Skipping deleted directory: $dir"
+        fi
+      done < <(jq -r '.[]' <<< "${MODIFIED_DIRECTORIES:-[]}")
+
+      if [ "$(jq 'length' <<< "$directories")" -gt 0 ]; then
+        has_directories=true
+      else
+        has_directories=false
+      fi
+
+      echo "Changed directories: $directories"
+      echo "has_directories=$has_directories" >> "$GITHUB_OUTPUT"
+      echo "directories=$directories" >> "$GITHUB_OUTPUT"
