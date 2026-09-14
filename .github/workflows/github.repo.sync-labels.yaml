@@ -56,9 +56,9 @@ jobs:
       run: |
         if [[ ! -f "${{ inputs.config_file }}" ]]; then
           echo "Config file ${{ inputs.config_file }} does not exist. Skipping label sync."
-          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "skip=true" >> "$GITHUB_OUTPUT"
         else
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Sync Labels
