@@ -1,0 +1,54 @@
+name: Packer - Validate
+description: Install the required plugins of a Packer template directory with `packer init` and validate it with `packer validate`. On failure, the output is added to the job summary. Requires the `packer` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Packer template directory to initialize and validate. Defaults to `./`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used by `packer init` to download plugins from GitHub without hitting the anonymous rate limit, exported as `PACKER_GITHUB_API_TOKEN`. Defaults to the automatically generated `github.token`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Packer Init
+    id: init
+    shell: bash
+    env:
+      PACKER_GITHUB_API_TOKEN: ${{ inputs.github_token }}
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      packer version
+      packer init "$TARGET_DIR" 2>&1 | tee "$RUNNER_TEMP/packer-validate-init.log"
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer init · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/packer-validate-init.log
+      lang: text
+
+  - name: Packer Validate
+    id: validate
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      packer validate "$TARGET_DIR" 2>&1 | tee "$RUNNER_TEMP/packer-validate.log"
+
+  - name: Add Failure Details to Job Summary
+    id: validate-summary
+    if: steps.validate.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer validate · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/packer-validate.log
+      lang: text
