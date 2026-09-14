@@ -1,5 +1,5 @@
 name: Terraform - Validate
-description: Initialize a Terraform directory without a backend and validate it with `terraform validate`. Requires the `terraform` CLI on the `PATH`.
+description: Initialize a Terraform directory without a backend and validate it with `terraform validate`. On failure, the output is added to the job summary. Requires the `terraform` CLI on the `PATH`.
 
 
 inputs:
@@ -30,7 +30,17 @@ runs:
       terraform -chdir="$TARGET_DIR" init \
         -backend=false \
         -input=false \
-        -no-color
+        -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-validate-init.log"
+
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ runner.temp }}/terraform-validate-init.log
+      lang: text
 
   - name: Terraform Validate
     id: validate
@@ -43,4 +53,13 @@ runs:
         export TF_WORKSPACE="$WORKSPACE"
       fi
 
-      terraform -chdir="$TARGET_DIR" validate -no-color
+      terraform -chdir="$TARGET_DIR" validate -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-validate.log"
+
+  - name: Add Failure Details to Job Summary
+    id: validate-summary
+    if: steps.validate.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform validate · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ runner.temp }}/terraform-validate.log
+      lang: text

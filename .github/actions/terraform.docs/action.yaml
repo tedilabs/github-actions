@@ -1,5 +1,5 @@
 name: Terraform - Docs
-description: Generate Terraform module documentation with `terraform-docs`, or check that it is up to date. Requires the `terraform-docs` CLI on the `PATH`.
+description: Generate Terraform module documentation with `terraform-docs`, or check that it is up to date. On failure, the output is added to the job summary. Requires the `terraform-docs` CLI on the `PATH`.
 
 
 inputs:
@@ -91,4 +91,13 @@ runs:
       # Run inside the module so relative `output-file`, `recursive-path`, and config discovery resolve against it.
       cd "$target_dir"
       terraform-docs --version
-      terraform-docs "${args[@]}" .
+      terraform-docs "${args[@]}" . 2>&1 | tee "$RUNNER_TEMP/terraform-docs.log"
+
+  - name: Add Failure Details to Job Summary
+    id: docs-summary
+    if: steps.docs.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform-docs · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/terraform-docs.log
+      lang: text
