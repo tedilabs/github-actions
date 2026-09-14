@@ -1,0 +1,52 @@
+name: GitHub - Step Summary
+description: Append the content of a file to the job summary as a collapsible `<details>` block with a fenced code block.
+
+
+inputs:
+  title:
+    required: true
+    description: "(Required) The text shown on the collapsed `<details>` line (e.g. `❌ terraform fmt · modules/foo`)."
+  file:
+    required: true
+    description: "(Required) The path of the file whose content is added inside the code block."
+  lang:
+    required: false
+    default: text
+    description: "(Optional) The language of the fenced code block (e.g. `diff`, `text`). Defaults to `text`."
+  max_lines:
+    required: false
+    default: "200"
+    description: "(Optional) The maximum number of lines to include. Longer content is truncated with a note. Defaults to `200`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Append Details to Job Summary
+    id: summary
+    shell: bash
+    env:
+      TITLE: ${{ inputs.title }}
+      FILE: ${{ inputs.file }}
+      LANG_: ${{ inputs.lang }}
+      MAX_LINES: ${{ inputs.max_lines }}
+    run: |
+      if [ ! -f "$FILE" ]; then
+        echo "::warning::Summary file not found: $FILE"
+        exit 0
+      fi
+
+      total="$(wc -l < "$FILE" | tr -d ' ')"
+      {
+        echo "<details><summary>$TITLE</summary>"
+        echo
+        echo '```'"$LANG_"
+        head -n "$MAX_LINES" "$FILE"
+        if [ "$total" -gt "$MAX_LINES" ]; then
+          echo "… ($((total - MAX_LINES)) more lines)"
+        fi
+        echo '```'
+        echo "</details>"
+        echo
+      } >> "$GITHUB_STEP_SUMMARY"
