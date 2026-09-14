@@ -1,0 +1,41 @@
+name: Packer - Format
+description: Check that Packer HCL templates are formatted with `packer fmt`. On failure, the diff is added to the job summary. Requires the `packer` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to check formatting in. Defaults to `./`."
+  recursive:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to also check subdirectories. Defaults to `true`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Check Packer Format
+    id: fmt
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      RECURSIVE: ${{ inputs.recursive }}
+    run: |
+      args=(-check -diff)
+      if [ "$RECURSIVE" = "true" ]; then
+        args+=(-recursive)
+      fi
+
+      packer fmt "${args[@]}" "$TARGET_DIR" 2>&1 | tee "$RUNNER_TEMP/packer-fmt.log"
+
+  - name: Add Failure Details to Job Summary
+    id: fmt-summary
+    if: steps.fmt.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer fmt · ${{ inputs.target_dir }}"
+      file: ${{ runner.temp }}/packer-fmt.log
+      lang: diff
