@@ -1,0 +1,127 @@
+name: Terraform - Changed Workspaces
+description: Resolve changed directories to the Terraform projects and workspaces that need to be checked, for use as a job matrix.
+
+
+inputs:
+  directories:
+    required: true
+    description: "(Required) A JSON array of changed directories, typically the `directories` output of the `git.changed-dirs` action."
+  marker_file:
+    required: false
+    default: versions.tf
+    description: "(Optional) The file that identifies a Terraform project directory. Each changed directory is resolved to the nearest directory, itself or an ancestor, that contains this file. Directories without one are skipped. Defaults to `versions.tf`."
+  exclude_dirs:
+    required: false
+    default: common
+    description: "(Optional) A comma-separated list of subdirectory names that are not workspaces (e.g. `common,files`). Hidden directories such as `.terraform` are always excluded. Every other subdirectory of a project is treated as a workspace. Defaults to `common`."
+
+outputs:
+  has_targets:
+    value: ${{ steps.resolve.outputs.has_targets }}
+    description: "Whether `targets` is non-empty. `true` or `false`."
+  targets:
+    value: ${{ steps.resolve.outputs.targets }}
+    description: "A JSON array of `{\"project\": ..., \"workspace\": ...}` objects for `strategy.matrix.include`. A change under `<project>/<workspace>/` targets that workspace only; any other change under `<project>/` targets every workspace of the project. A project without workspace directories yields one target with an empty `workspace`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Projects and Workspaces
+    id: resolve
+    shell: bash
+    env:
+      DIRECTORIES: ${{ inputs.directories }}
+      MARKER_FILE: ${{ inputs.marker_file }}
+      EXCLUDE_DIRS: ${{ inputs.exclude_dirs }}
+    run: |
+      IFS=',' read -ra exclude_dirs <<< "$EXCLUDE_DIRS"
+
+      is_excluded() {
+        local name="$1" excluded
+        for excluded in "${exclude_dirs[@]}"; do
+          excluded="${excluded// /}"
+          if [ -n "$excluded" ] && [ "$excluded" = "$name" ]; then
+            return 0
+          fi
+        done
+        return 1
+      }
+
+      # Every non-hidden, non-excluded subdirectory of a project is a workspace.
+      list_workspaces() {
+        local project="$1" path name
+        shopt -s nullglob
+        for path in "$project"/*/; do
+          name="$(basename "$path")"
+          is_excluded "$name" || echo "$name"
+        done
+      }
+
+      targets="[]"
+      add_target() {
+        targets="$(jq -c --arg project "$1" --arg workspace "$2" '. + [{project: $project, workspace: $workspace}] | unique' <<< "$targets")"
+      }
+
+      while IFS= read -r dir; do
+        [ -z "$dir" ] && continue
+
+        # Walk up from the changed directory to the nearest directory containing the marker file.
+        project=""
+        current="$dir"
+        while :; do
+          if [ -f "$current/$MARKER_FILE" ]; then
+            project="$current"
+            break
+          fi
+          [ "$current" = "." ] && break
+          current="$(dirname "$current")"
+        done
+
+        if [ -z "$project" ]; then
+          echo "Skipping $dir: no $MARKER_FILE in the directory or its parents."
+          continue
+        fi
+
+        workspaces=()
+        while IFS= read -r name; do
+          workspaces+=("$name")
+        done < <(list_workspaces "$project")
+
+        if [ "${#workspaces[@]}" -eq 0 ]; then
+          echo "$dir -> $project (no workspace directories)"
+          add_target "$project" ""
+          continue
+        fi
+
+        # The first path segment below the project decides the scope.
+        if [ "$project" = "." ]; then
+          relative="$dir"
+          [ "$relative" = "." ] && relative=""
+        else
+          relative="${dir#"$project"}"
+          relative="${relative#/}"
+        fi
+        first="${relative%%/*}"
+
+        if [ -n "$first" ] && printf '%s\n' "${workspaces[@]}" | grep -qxF -- "$first"; then
+          echo "$dir -> $project / $first"
+          add_target "$project" "$first"
+        else
+          echo "$dir -> $project (all workspaces: ${workspaces[*]})"
+          for name in "${workspaces[@]}"; do
+            add_target "$project" "$name"
+          done
+        fi
+      done < <(jq -r '.[]' <<< "${DIRECTORIES:-[]}")
+
+      if [ "$(jq 'length' <<< "$targets")" -gt 0 ]; then
+        has_targets=true
+      else
+        has_targets=false
+      fi
+
+      echo "Targets: $targets"
+      echo "has_targets=$has_targets" >> "$GITHUB_OUTPUT"
+      echo "targets=$targets" >> "$GITHUB_OUTPUT"
