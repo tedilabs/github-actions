@@ -1,0 +1,94 @@
+name: Terraform - Docs
+description: Generate Terraform module documentation with `terraform-docs`, or check that it is up to date. Requires the `terraform-docs` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Terraform module directory to document. Defaults to `./`."
+  check:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to only check that the documentation is up to date (`--output-check`) instead of writing it. Defaults to `false`, which generates the documentation in place."
+  output_file:
+    required: false
+    default: README.md
+    description: "(Optional) The file that holds the generated documentation, relative to each module directory. In non-recursive mode the action is skipped when the file does not exist, matching the behavior of the `terraform_docs` pre-commit hook. Defaults to `README.md`."
+  formatter:
+    required: false
+    default: markdown table
+    description: "(Optional) The `terraform-docs` formatter to use (e.g. `markdown table`, `markdown document`). Overrides the `formatter` of the config file. Set to an empty string to use the formatter from the config file. Defaults to `markdown table`."
+  config_file:
+    required: false
+    description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the module directory as usual."
+  recursive:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to also document the submodules under `recursive_path`. Defaults to `false`."
+  recursive_path:
+    required: false
+    default: modules
+    description: "(Optional) The directory, relative to `target_dir`, whose subdirectories are documented as submodules in recursive mode. Defaults to `modules`."
+  recursive_exclude:
+    required: false
+    description: "(Optional) A comma-separated list of submodule directories to exclude in recursive mode, relative to `recursive_path` (e.g. `foo,bar`)."
+  recursive_include_main:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to also document the main module at `target_dir` in recursive mode. Set to `false` when `target_dir` is the repository root and its `README.md` is not managed by `terraform-docs`. Defaults to `true`."
+  args:
+    required: false
+    description: "(Optional) Additional arguments to pass to `terraform-docs` (e.g. `--sort-by required`)."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Run Terraform Docs
+    id: docs
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      CHECK: ${{ inputs.check }}
+      OUTPUT_FILE: ${{ inputs.output_file }}
+      FORMATTER: ${{ inputs.formatter }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+      RECURSIVE: ${{ inputs.recursive }}
+      RECURSIVE_PATH: ${{ inputs.recursive_path }}
+      RECURSIVE_EXCLUDE: ${{ inputs.recursive_exclude }}
+      RECURSIVE_INCLUDE_MAIN: ${{ inputs.recursive_include_main }}
+      ARGS: ${{ inputs.args }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+
+      if [ "$RECURSIVE" != "true" ] && [ ! -f "$target_dir/$OUTPUT_FILE" ]; then
+        echo "::notice::Skipping terraform-docs: $target_dir/$OUTPUT_FILE does not exist."
+        exit 0
+      fi
+
+      # The formatter is a positional subcommand, so it must come first.
+      read -ra formatter_args <<< "$FORMATTER"
+      read -ra extra_args <<< "$ARGS"
+
+      args=("${formatter_args[@]}" --output-file "$OUTPUT_FILE")
+      if [ "$CHECK" = "true" ]; then
+        args+=(--output-check)
+      fi
+      if [ "$RECURSIVE" = "true" ]; then
+        args+=(--recursive --recursive-path "$RECURSIVE_PATH" --recursive-include-main="$RECURSIVE_INCLUDE_MAIN")
+        if [ -n "$RECURSIVE_EXCLUDE" ]; then
+          args+=(--recursive-exclude "$RECURSIVE_EXCLUDE")
+        fi
+      fi
+      if [ -n "$CONFIG_FILE" ]; then
+        args+=(--config "$(realpath "$CONFIG_FILE")")
+      fi
+      args+=("${extra_args[@]}")
+
+      # Run inside the module so relative `output-file`, `recursive-path`, and config discovery resolve against it.
+      cd "$target_dir"
+      terraform-docs --version
+      terraform-docs "${args[@]}" .
