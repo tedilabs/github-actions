@@ -1,0 +1,219 @@
+name: Terraform Modules - Integration
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      paths:
+        type: string
+        required: false
+        default: |
+          modules/**
+          examples/**
+        description: "(Optional) File and directory patterns used to detect changed Terraform directories, one per line. Defaults to `modules/**` and `examples/**`."
+      paths_max_depth:
+        type: string
+        required: false
+        default: "2"
+        description: "(Optional) The maximum depth of the changed directories to check. For example, `modules/foo/bar.tf` with a max depth of `2` is checked as `modules/foo`. Defaults to `2`."
+
+      terraform_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `terraform` to install with mise. A version prefix such as `1.13` installs the latest matching release. Defaults to `latest`."
+      terraform_host:
+        type: string
+        required: false
+        default: app.terraform.io
+        description: "(Optional) The hostname of the Terraform Cloud/Enterprise instance that the `terraform_token` secret authenticates to. Defaults to `app.terraform.io`."
+      tflint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `tflint` to install with mise. Defaults to `latest`."
+      terraform_docs_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `terraform-docs` to install with mise. Defaults to `latest`."
+
+      fmt_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to check formatting with `terraform fmt`. Defaults to `true`."
+      validate_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to run `terraform init -backend=false` and `terraform validate`. Defaults to `true`."
+      tflint_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to lint with `tflint`. Defaults to `true`."
+      tflint_config_file:
+        type: string
+        required: false
+        default: .tflint.hcl
+        description: "(Optional) The path to the `tflint` config file, relative to the repository root. Defaults to `.tflint.hcl`."
+      tflint_minimum_failure_severity:
+        type: string
+        required: false
+        default: warning
+        description: "(Optional) The minimum `tflint` severity that fails the job. Valid values are `error`, `warning`, or `notice`. Defaults to `warning`."
+      tflint_recursive:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether `tflint` also lints nested directories under each changed directory that contain Terraform files. Defaults to `false`."
+      terraform_docs_enabled:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether to check that `README.md` is up to date with `terraform-docs`. Directories without a `README.md` are skipped. The check only passes when CI reproduces the local generation: pin `terraform_docs_version` to the version used with pre-commit, and either commit `.terraform.lock.hcl` or set `settings.lockfile: false` in `.terraform-docs.yml` so the provider version column does not depend on a local lock file. Defaults to `false`."
+      terraform_docs_config_file:
+        type: string
+        required: false
+        description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the module directory as usual."
+      terraform_docs_args:
+        type: string
+        required: false
+        default: --sort-by required
+        description: "(Optional) Additional arguments to pass to `terraform-docs`. Defaults to `--sort-by required`."
+      terraform_docs_recursive:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether `terraform-docs` also checks the submodules under `terraform_docs_recursive_path` of each changed directory. Defaults to `false`."
+      terraform_docs_recursive_path:
+        type: string
+        required: false
+        default: modules
+        description: "(Optional) The directory, relative to each changed directory, whose subdirectories are checked as submodules when `terraform_docs_recursive` is enabled. Defaults to `modules`."
+      terraform_docs_recursive_exclude:
+        type: string
+        required: false
+        description: "(Optional) A comma-separated list of submodule directories to exclude when `terraform_docs_recursive` is enabled, relative to `terraform_docs_recursive_path`."
+
+    secrets:
+      terraform_token:
+        required: false
+        description: "(Optional) The API token for the Terraform Cloud/Enterprise instance at `terraform_host`. Exported as a `TF_TOKEN_<host>` environment variable so `terraform init` can download private registry modules."
+
+
+jobs:
+  changed:
+    name: Detect Changed Directories
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    outputs:
+      has_directories: ${{ steps.changed-dirs.outputs.has_directories }}
+      directories: ${{ steps.changed-dirs.outputs.directories }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: changed-dirs
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      with:
+        paths: ${{ inputs.paths }}
+        max_depth: ${{ inputs.paths_max_depth }}
+
+
+  lint:
+    name: Lint (${{ matrix.path }})
+    needs:
+    - changed
+    if: needs.changed.outputs.has_directories == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ${{ fromJson(needs.changed.outputs.directories) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          terraform = "${{ inputs.terraform_version }}"
+          tflint = "${{ inputs.tflint_version }}"
+          terraform-docs = "${{ inputs.terraform_docs_version }}"
+
+    # Terraform reads credentials from `TF_TOKEN_<hostname>` with `.` replaced by `_` and `-` by `__`.
+    - name: Configure Terraform Credentials
+      id: configure-credentials
+      env:
+        TERRAFORM_HOST: ${{ inputs.terraform_host }}
+        TERRAFORM_TOKEN: ${{ secrets.terraform_token }}
+      run: |
+        if [ -z "$TERRAFORM_TOKEN" ]; then
+          echo "No terraform_token provided. Skipping."
+          exit 0
+        fi
+
+        host="${TERRAFORM_HOST//-/__}"
+        host="${host//./_}"
+        echo "::add-mask::$TERRAFORM_TOKEN"
+        echo "TF_TOKEN_${host}=${TERRAFORM_TOKEN}" >> "$GITHUB_ENV"
+
+    - name: Check Format
+      id: fmt
+      if: inputs.fmt_enabled
+      uses: tedilabs/github-actions/.github/actions/terraform.fmt@main
+      with:
+        target_dir: ${{ matrix.path }}
+
+    - name: Validate
+      id: validate
+      if: inputs.validate_enabled
+      uses: tedilabs/github-actions/.github/actions/terraform.validate@main
+      with:
+        target_dir: ${{ matrix.path }}
+
+    - name: Lint (tflint)
+      id: tflint
+      if: inputs.tflint_enabled
+      uses: tedilabs/github-actions/.github/actions/terraform.tflint@main
+      with:
+        target_dir: ${{ matrix.path }}
+        config_file: ${{ inputs.tflint_config_file }}
+        minimum_failure_severity: ${{ inputs.tflint_minimum_failure_severity }}
+        recursive: ${{ inputs.tflint_recursive }}
+
+    - name: Check Docs
+      id: docs
+      if: inputs.terraform_docs_enabled
+      uses: tedilabs/github-actions/.github/actions/terraform.docs@main
+      with:
+        target_dir: ${{ matrix.path }}
+        check: "true"
+        config_file: ${{ inputs.terraform_docs_config_file }}
+        recursive: ${{ inputs.terraform_docs_recursive }}
+        recursive_path: ${{ inputs.terraform_docs_recursive_path }}
+        recursive_exclude: ${{ inputs.terraform_docs_recursive_exclude }}
+        args: ${{ inputs.terraform_docs_args }}
