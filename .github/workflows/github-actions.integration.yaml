@@ -1,0 +1,129 @@
+name: GitHub Actions - Integration
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      actionlint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `actionlint` to install with mise. Defaults to `latest`."
+      shellcheck_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `shellcheck` to install with mise. Used by `actionlint` to check `run` scripts. Defaults to `latest`."
+      check_jsonschema_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `check-jsonschema` to install with mise. Defaults to `latest`."
+
+      actionlint_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to lint workflow files with `actionlint`. Defaults to `true`."
+      actionlint_config_file:
+        type: string
+        required: false
+        description: "(Optional) The path to the `actionlint` config file, relative to the repository root. When omitted, `actionlint` discovers `.github/actionlint.yaml` as usual."
+      actionlint_shellcheck_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether `actionlint` also checks `run` scripts with `shellcheck`. Defaults to `true`."
+      check_jsonschema_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to validate workflow files and action metadata files against the SchemaStore schemas with `check-jsonschema`. This is the only check that covers composite actions. Defaults to `true`."
+
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the integration report as a single sticky comment on pull requests. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
+
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          actionlint = "${{ inputs.actionlint_version }}"
+          shellcheck = "${{ inputs.shellcheck_version }}"
+          "pipx:check-jsonschema" = "${{ inputs.check_jsonschema_version }}"
+
+    - name: Lint (actionlint)
+      id: actionlint
+      if: inputs.actionlint_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@main
+      with:
+        config_file: ${{ inputs.actionlint_config_file }}
+        shellcheck_enabled: ${{ inputs.actionlint_shellcheck_enabled }}
+
+    - name: Validate (check-jsonschema)
+      id: check-jsonschema
+      if: inputs.check_jsonschema_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@main
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ github.repository }}
+        id_label: Repository
+        artifact_prefix: github-actions-integration
+        job_status: ${{ job.status }}
+        results: |
+          {
+            "actionlint": "${{ steps.actionlint.outcome }}",
+            "check-jsonschema": "${{ steps.check-jsonschema.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - lint
+    if: always()
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Repository
+        artifact_prefix: github-actions-integration
+        title: GitHub Actions Integration
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: github-actions-integration
