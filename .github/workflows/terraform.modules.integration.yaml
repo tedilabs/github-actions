@@ -107,6 +107,12 @@ on:
         required: false
         description: "(Optional) A comma-separated list of submodule directories to exclude when `terraform_docs_recursive` is enabled, relative to `terraform_docs_recursive_path`."
 
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the integration report as a single sticky comment on pull requests. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
+
     secrets:
       terraform_token:
         required: false
@@ -184,6 +190,7 @@ jobs:
     - name: Check Format
       id: fmt
       if: inputs.fmt_enabled
+      continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.fmt@main
       with:
         target_dir: ${{ matrix.path }}
@@ -191,6 +198,7 @@ jobs:
     - name: Validate
       id: validate
       if: inputs.validate_enabled
+      continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.validate@main
       with:
         target_dir: ${{ matrix.path }}
@@ -198,6 +206,7 @@ jobs:
     - name: Lint (tflint)
       id: tflint
       if: inputs.tflint_enabled
+      continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.tflint@main
       with:
         target_dir: ${{ matrix.path }}
@@ -208,6 +217,7 @@ jobs:
     - name: Check Docs
       id: docs
       if: inputs.terraform_docs_enabled
+      continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.docs@main
       with:
         target_dir: ${{ matrix.path }}
@@ -217,3 +227,42 @@ jobs:
         recursive_path: ${{ inputs.terraform_docs_recursive_path }}
         recursive_exclude: ${{ inputs.terraform_docs_recursive_exclude }}
         args: ${{ inputs.terraform_docs_args }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ matrix.path }}
+        id_label: Directory
+        artifact_prefix: terraform-integration
+        job_status: ${{ job.status }}
+        results: |
+          {
+            "fmt": "${{ steps.fmt.outcome }}",
+            "validate": "${{ steps.validate.outcome }}",
+            "tflint": "${{ steps.tflint.outcome }}",
+            "docs": "${{ steps.docs.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - changed
+    - lint
+    if: always() && needs.changed.outputs.has_directories == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Directory
+        artifact_prefix: terraform-integration
+        title: Terraform Integration
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: terraform-integration
