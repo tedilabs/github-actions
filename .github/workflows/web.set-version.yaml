@@ -27,6 +27,10 @@ on:
         type: string
         required: false
         description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+      aws_chained_session_name:
+        type: string
+        required: false
+        description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
 
       version:
         type: string
