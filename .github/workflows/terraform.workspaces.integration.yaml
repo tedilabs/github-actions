@@ -1,0 +1,264 @@
+name: Terraform Workspaces - Integration
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      paths:
+        type: string
+        required: false
+        description: "(Optional) File and directory patterns used to detect changes, one per line. Defaults to the entire repository; changes outside a Terraform project are ignored anyway."
+      marker_file:
+        type: string
+        required: false
+        default: versions.tf
+        description: "(Optional) The file that identifies a Terraform project directory. Each changed path is resolved to the nearest directory containing it. Defaults to `versions.tf`."
+      workspace_exclude_dirs:
+        type: string
+        required: false
+        default: common,policies,files
+        description: "(Optional) A comma-separated list of project subdirectory names that are not workspaces. Every other subdirectory of a project is treated as a workspace, so a shared directory left out of this list becomes a bogus target whose `terraform validate` fails. Defaults to `common,policies,files`."
+
+      terraform_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
+      terraform_host:
+        type: string
+        required: false
+        default: app.terraform.io
+        description: "(Optional) The hostname of the Terraform Cloud/Enterprise instance that the `terraform_token` secret authenticates to. Defaults to `app.terraform.io`."
+      tflint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `tflint` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
+      terraform_docs_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `terraform-docs` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
+
+      fmt_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to check formatting with `terraform fmt`. Defaults to `true`."
+      validate_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to run `terraform init -backend=false` and `terraform validate` with `TF_WORKSPACE` set to the target workspace. Defaults to `true`."
+      tflint_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to lint with `tflint`. Defaults to `true`."
+      tflint_config_file:
+        type: string
+        required: false
+        default: .tflint.hcl
+        description: "(Optional) The path to the `tflint` config file, relative to the repository root. Defaults to `.tflint.hcl`."
+      tflint_minimum_failure_severity:
+        type: string
+        required: false
+        default: warning
+        description: "(Optional) The minimum `tflint` severity that fails the job. Valid values are `error`, `warning`, or `notice`. Defaults to `warning`."
+      tflint_recursive:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether `tflint` also lints nested directories under each project that contain Terraform files. Defaults to `false`."
+      terraform_docs_enabled:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Whether to check that the project `README.md` is up to date with `terraform-docs`. Projects without a `README.md` are skipped. Defaults to `false`."
+      terraform_docs_config_file:
+        type: string
+        required: false
+        description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the project directory as usual."
+      terraform_docs_args:
+        type: string
+        required: false
+        default: --sort-by required
+        description: "(Optional) Additional arguments to pass to `terraform-docs`. Defaults to `--sort-by required`."
+
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the integration report as a single sticky comment on pull requests. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
+
+    secrets:
+      terraform_token:
+        required: false
+        description: "(Optional) The API token for the Terraform Cloud/Enterprise instance at `terraform_host`. Exported as a `TF_TOKEN_<host>` environment variable so `terraform init` can download private registry modules."
+
+
+jobs:
+  changed:
+    name: Detect Changed Workspaces
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    outputs:
+      has_targets: ${{ steps.changed-workspaces.outputs.has_targets }}
+      targets: ${{ steps.changed-workspaces.outputs.targets }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: changed-dirs
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      with:
+        paths: ${{ inputs.paths }}
+
+    - name: Resolve Changed Workspaces
+      id: changed-workspaces
+      uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@main
+      with:
+        directories: ${{ steps.changed-dirs.outputs.directories }}
+        marker_file: ${{ inputs.marker_file }}
+        exclude_dirs: ${{ inputs.workspace_exclude_dirs }}
+
+
+  lint:
+    name: Lint (${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }})
+    needs:
+    - changed
+    if: needs.changed.outputs.has_targets == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.changed.outputs.targets) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
+    # still take precedence while a self-hosted runner's real global config is left untouched.
+    - name: Set Default Tool Versions
+      id: default-tools
+      env:
+        TERRAFORM_VERSION: ${{ inputs.terraform_version }}
+        TFLINT_VERSION: ${{ inputs.tflint_version }}
+        TERRAFORM_DOCS_VERSION: ${{ inputs.terraform_docs_version }}
+      run: |
+        config_file="$RUNNER_TEMP/mise-defaults.toml"
+        cat > "$config_file" <<TOML
+        [tools]
+        terraform = "$TERRAFORM_VERSION"
+        tflint = "$TFLINT_VERSION"
+        terraform-docs = "$TERRAFORM_DOCS_VERSION"
+        TOML
+
+        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+
+    - name: Configure Terraform Credentials
+      id: configure-credentials
+      uses: tedilabs/github-actions/.github/actions/terraform.configure-credentials@main
+      with:
+        host: ${{ inputs.terraform_host }}
+        token: ${{ secrets.terraform_token }}
+
+    - name: Check Format
+      id: fmt
+      if: inputs.fmt_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.fmt@main
+      with:
+        target_dir: ${{ matrix.project }}
+
+    - name: Validate
+      id: validate
+      if: inputs.validate_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.validate@main
+      with:
+        target_dir: ${{ matrix.project }}
+        workspace: ${{ matrix.workspace }}
+
+    - name: Lint (tflint)
+      id: tflint
+      if: inputs.tflint_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.tflint@main
+      with:
+        target_dir: ${{ matrix.project }}
+        config_file: ${{ inputs.tflint_config_file }}
+        minimum_failure_severity: ${{ inputs.tflint_minimum_failure_severity }}
+        recursive: ${{ inputs.tflint_recursive }}
+
+    - name: Check Docs
+      id: docs
+      if: inputs.terraform_docs_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.docs@main
+      with:
+        target_dir: ${{ matrix.project }}
+        check: "true"
+        config_file: ${{ inputs.terraform_docs_config_file }}
+        args: ${{ inputs.terraform_docs_args }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }}
+        id_label: Workspace
+        artifact_prefix: terraform-workspaces-integration
+        job_status: ${{ job.status }}
+        results: |
+          {
+            "fmt": "${{ steps.fmt.outcome }}",
+            "validate": "${{ steps.validate.outcome }}",
+            "tflint": "${{ steps.tflint.outcome }}",
+            "docs": "${{ steps.docs.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - changed
+    - lint
+    if: always() && needs.changed.outputs.has_targets == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Workspace
+        artifact_prefix: terraform-workspaces-integration
+        title: Terraform Workspaces Integration
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: terraform-workspaces-integration
