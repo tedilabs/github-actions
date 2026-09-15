@@ -1,0 +1,46 @@
+name: Terraform - Configure Credentials
+description: Authenticate the job to a Terraform Cloud/Enterprise instance by exporting a `TF_TOKEN_<host>` environment variable, so that `terraform init` can reach its private registry.
+
+
+inputs:
+  host:
+    required: false
+    default: app.terraform.io
+    description: "(Optional) The hostname of the Terraform Cloud/Enterprise instance that `token` authenticates to. Defaults to `app.terraform.io`."
+  token:
+    required: false
+    description: "(Optional) The API token for the instance at `host`. When empty, the action does nothing, so a workflow can stay usable without credentials (e.g. on a pull request from a fork). Pass a secret, never a plain string."
+
+
+runs:
+  using: composite
+
+  steps:
+  # The exported variable stays in the environment of every later step of the calling job.
+  - name: Configure Terraform Credentials
+    id: configure-credentials
+    shell: bash
+    env:
+      TERRAFORM_HOST: ${{ inputs.host }}
+      TERRAFORM_TOKEN: ${{ inputs.token }}
+    run: |
+      if [ -z "$TERRAFORM_TOKEN" ]; then
+        echo "No token provided. Skipping."
+        exit 0
+      fi
+
+      # Mask first, and do it even for a secret, which GitHub already masks, in case the
+      # caller wired this input to a value that GitHub does not know to be sensitive.
+      echo "::add-mask::$TERRAFORM_TOKEN"
+
+      # A newline would end the `KEY=value` line and let the rest inject further variables.
+      if [[ "$TERRAFORM_TOKEN" == *$'\n'* ]]; then
+        echo "::error::The token must not contain a newline."
+        exit 1
+      fi
+
+      # Terraform reads credentials from `TF_TOKEN_<hostname>` with `.` replaced by `_` and `-` by `__`.
+      host="${TERRAFORM_HOST//-/__}"
+      host="${host//./_}"
+
+      echo "TF_TOKEN_${host}=${TERRAFORM_TOKEN}" >> "$GITHUB_ENV"
