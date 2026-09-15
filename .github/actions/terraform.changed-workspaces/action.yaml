@@ -12,8 +12,8 @@ inputs:
     description: "(Optional) The file that identifies a Terraform project directory. Each changed directory is resolved to the nearest directory, itself or an ancestor, that contains this file. Directories without one are skipped. Defaults to `versions.tf`."
   exclude_dirs:
     required: false
-    default: common
-    description: "(Optional) A comma-separated list of subdirectory names that are not workspaces (e.g. `common,files`). Hidden directories such as `.terraform` are always excluded. Every other subdirectory of a project is treated as a workspace. Defaults to `common`."
+    default: common,policies,files
+    description: "(Optional) A comma-separated list of subdirectory names that are not workspaces. Hidden directories such as `.terraform` are always excluded. Every other subdirectory of a project is treated as a workspace, so a shared directory left out of this list becomes a bogus target. Defaults to `common,policies,files`."
 
 outputs:
   has_targets:
