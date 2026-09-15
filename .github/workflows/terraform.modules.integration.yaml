@@ -170,22 +170,12 @@ jobs:
           tflint = "${{ inputs.tflint_version }}"
           terraform-docs = "${{ inputs.terraform_docs_version }}"
 
-    # Terraform reads credentials from `TF_TOKEN_<hostname>` with `.` replaced by `_` and `-` by `__`.
     - name: Configure Terraform Credentials
       id: configure-credentials
-      env:
-        TERRAFORM_HOST: ${{ inputs.terraform_host }}
-        TERRAFORM_TOKEN: ${{ secrets.terraform_token }}
-      run: |
-        if [ -z "$TERRAFORM_TOKEN" ]; then
-          echo "No terraform_token provided. Skipping."
-          exit 0
-        fi
-
-        host="${TERRAFORM_HOST//-/__}"
-        host="${host//./_}"
-        echo "::add-mask::$TERRAFORM_TOKEN"
-        echo "TF_TOKEN_${host}=${TERRAFORM_TOKEN}" >> "$GITHUB_ENV"
+      uses: tedilabs/github-actions/.github/actions/terraform.configure-credentials@main
+      with:
+        host: ${{ inputs.terraform_host }}
+        token: ${{ secrets.terraform_token }}
 
     - name: Check Format
       id: fmt
