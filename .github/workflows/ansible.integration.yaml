@@ -1,0 +1,86 @@
+name: Ansible - Integration
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      target_dir:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) The Ansible project directory to lint, where `.ansible-lint` and `ansible.cfg` live. Defaults to `./`."
+      requirements_file:
+        type: string
+        required: false
+        description: "(Optional) The path to a Galaxy requirements file, relative to the repository root (e.g. `ansible/requirements.yaml`). When set, its collections are installed so `ansible-lint` can resolve them. When omitted, `ansible-lint` installs a `requirements.yml` found in the project directory on its own."
+
+      python_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `python` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. `ansible-lint` is installed into it with `pip`. Defaults to `latest`."
+      ansible_lint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `ansible-lint` to install with `pip` (e.g. `25.1.3`). Defaults to `latest`."
+
+
+jobs:
+  lint:
+    name: Lint (ansible-lint)
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
+    # still take precedence while a self-hosted runner's real global config is left untouched.
+    - name: Set Default Tool Versions
+      id: default-tools
+      env:
+        PYTHON_VERSION: ${{ inputs.python_version }}
+      run: |
+        config_file="$RUNNER_TEMP/mise-defaults.toml"
+        cat > "$config_file" <<TOML
+        [tools]
+        python = "$PYTHON_VERSION"
+        TOML
+
+        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+
+    - name: Install ansible-lint
+      id: install-ansible-lint
+      env:
+        ANSIBLE_LINT_VERSION: ${{ inputs.ansible_lint_version }}
+      run: |
+        package="ansible-lint"
+        if [ "$ANSIBLE_LINT_VERSION" != "latest" ]; then
+          package="ansible-lint==$ANSIBLE_LINT_VERSION"
+        fi
+
+        python -m pip install --upgrade pip
+        python -m pip install "$package"
+
+    - name: Lint (ansible-lint)
+      id: ansible-lint
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@main
+      with:
+        target_dir: ${{ inputs.target_dir }}
+        requirements_file: ${{ inputs.requirements_file }}
