@@ -11,16 +11,38 @@ inputs:
     required: false
     description: "(Optional) The Terraform workspace name to validate as, exported as `TF_WORKSPACE`. Needed when the configuration references `terraform.workspace` (e.g. to locate `<workspace>/config.yaml`). Defaults to Terraform's `default` workspace."
 
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` holds no Terraform files and neither `terraform init` nor `terraform validate` was run. Empty otherwise."
+
 
 runs:
   using: composite
 
   steps:
-  - name: Terraform Init
-    id: init
+  - name: Resolve Target
+    id: target
     shell: bash
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      # `terraform validate` reports an empty directory as valid, which would be a vacuous pass.
+      if [ -z "$(find "$target_dir" -maxdepth 1 -type f \( -name '*.tf' -o -name '*.tf.json' \) -print -quit)" ]; then
+        echo "::notice::Skipping terraform validate: no Terraform files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+      fi
+
+  - name: Terraform Init
+    id: init
+    if: steps.target.outputs.skipped != 'true'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
     run: |
       if [ -n "$WORKSPACE" ]; then
@@ -44,9 +66,10 @@ runs:
 
   - name: Terraform Validate
     id: validate
+    if: steps.target.outputs.skipped != 'true'
     shell: bash
     env:
-      TARGET_DIR: ${{ inputs.target_dir }}
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
     run: |
       if [ -n "$WORKSPACE" ]; then

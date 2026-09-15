@@ -21,7 +21,7 @@ inputs:
     description: "(Optional) The `terraform-docs` formatter to use (e.g. `markdown table`, `markdown document`). Overrides the `formatter` of the config file. Set to an empty string to use the formatter from the config file. Defaults to `markdown table`."
   config_file:
     required: false
-    description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the module directory as usual."
+    description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, or when the file does not exist (the action warns in that case), `terraform-docs` discovers `.terraform-docs.yml` from the module directory as usual."
   recursive:
     required: false
     default: "false"
@@ -40,6 +40,11 @@ inputs:
   args:
     required: false
     description: "(Optional) Additional arguments to pass to `terraform-docs` (e.g. `--sort-by required`)."
+
+outputs:
+  skipped:
+    value: ${{ steps.docs.outputs.skipped }}
+    description: "`true` when `target_dir` holds no Terraform files, or when `output_file` does not exist in non-recursive mode, and `terraform-docs` was not run. Empty otherwise."
 
 
 runs:
@@ -64,8 +69,18 @@ runs:
       target_dir="${TARGET_DIR%/}"
       target_dir="${target_dir:-.}"
 
+      # `terraform-docs` exits 0 on a directory without Terraform files, which would report a vacuous pass.
+      depth_args=()
+      [ "$RECURSIVE" = "true" ] || depth_args=(-maxdepth 1)
+      if [ -z "$(find "$target_dir" "${depth_args[@]}" -type f \( -name '*.tf' -o -name '*.tf.json' \) -print -quit)" ]; then
+        echo "::notice::Skipping terraform-docs: no Terraform files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
       if [ "$RECURSIVE" != "true" ] && [ ! -f "$target_dir/$OUTPUT_FILE" ]; then
         echo "::notice::Skipping terraform-docs: $target_dir/$OUTPUT_FILE does not exist."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
         exit 0
       fi
 
@@ -83,8 +98,10 @@ runs:
           args+=(--recursive-exclude "$RECURSIVE_EXCLUDE")
         fi
       fi
-      if [ -n "$CONFIG_FILE" ]; then
+      if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
         args+=(--config "$(realpath "$CONFIG_FILE")")
+      elif [ -n "$CONFIG_FILE" ]; then
+        echo "::warning::terraform-docs config file not found: $CONFIG_FILE. Falling back to config discovery from $target_dir."
       fi
       args+=("${extra_args[@]}")
 

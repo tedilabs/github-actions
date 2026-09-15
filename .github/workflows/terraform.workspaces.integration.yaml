@@ -234,12 +234,14 @@ jobs:
         id_label: Workspace
         artifact_prefix: terraform-workspaces-integration
         job_status: ${{ job.status }}
+        # An empty value keeps a check that is turned off out of the report; a check that ran but had
+        # nothing to do reports `skipped`.
         results: |
           {
-            "fmt": "${{ steps.fmt.outcome }}",
-            "validate": "${{ steps.validate.outcome }}",
-            "tflint": "${{ steps.tflint.outcome }}",
-            "docs": "${{ steps.docs.outcome }}"
+            "fmt": "${{ inputs.fmt_enabled && (steps.fmt.outputs.skipped == 'true' && 'skipped' || steps.fmt.outcome) || '' }}",
+            "validate": "${{ inputs.validate_enabled && (steps.validate.outputs.skipped == 'true' && 'skipped' || steps.validate.outcome) || '' }}",
+            "tflint": "${{ inputs.tflint_enabled && (steps.tflint.outputs.skipped == 'true' && 'skipped' || steps.tflint.outcome) || '' }}",
+            "docs": "${{ inputs.terraform_docs_enabled && (steps.docs.outputs.skipped == 'true' && 'skipped' || steps.docs.outcome) || '' }}"
           }
 
 

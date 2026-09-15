@@ -15,7 +15,7 @@ inputs:
     description: "(Optional) The header of the first column. Defaults to `Target`."
   results:
     required: false
-    description: "(Required in `collect` mode) A JSON object mapping each check name to its step outcome, e.g. `{\"fmt\": \"success\", \"tflint\": \"failure\"}`. Key order defines the column order. Values are usually `steps.<id>.outcome`: `success`, `failure`, `skipped`, or `cancelled`."
+    description: "(Required in `collect` mode) A JSON object mapping each check name to its step outcome, e.g. `{\"fmt\": \"success\", \"tflint\": \"failure\"}`. Key order defines the column order. Values are usually `steps.<id>.outcome`: `success`, `failure`, `skipped`, or `cancelled`. An empty value drops the check from the row, so a check that is turned off for the whole workflow leaves no column behind."
   job_status:
     required: false
     description: "(Optional, `collect` mode) The current job status, usually the `job.status` context. When it is `failure` while no check failed (e.g. a setup step failed), the row is flagged as failed."
@@ -76,17 +76,20 @@ runs:
         exit 1
       fi
 
+      # An empty value means the check is turned off rather than skipped, so leave it out of the report.
+      results="$(jq -c 'with_entries(select(.value != ""))' <<< "$RESULTS")"
+
       # Artifact names cannot contain path separators or most punctuation, so derive a safe unique key.
       key="$(printf '%s' "$ID" | tr -c 'A-Za-z0-9._-' '-')-$(printf '%s' "$ID" | shasum | cut -c1-8)"
       dir="$RUNNER_TEMP/matrix-report"
       mkdir -p "$dir"
-      jq -n --arg id "$ID" --arg job_status "$JOB_STATUS" --argjson results "$RESULTS" \
+      jq -n --arg id "$ID" --arg job_status "$JOB_STATUS" --argjson results "$results" \
         '{id: $id, job_status: $job_status, results: $results}' > "$dir/$key.json"
 
       {
-        echo "| $ID_LABEL | $(jq -r 'keys_unsorted | join(" | ")' <<< "$RESULTS") |"
-        echo "|---|$(jq -r 'keys_unsorted | map(":-:") | join("|")' <<< "$RESULTS")|"
-        echo "| $ID | $(jq -r 'def icon: {success: "✅", failure: "❌", skipped: "⏭️", cancelled: "⚠️"}[.] // .; [.[]] | map(icon) | join(" | ")' <<< "$RESULTS") |"
+        echo "| $ID_LABEL | $(jq -r 'keys_unsorted | join(" | ")' <<< "$results") |"
+        echo "|---|$(jq -r 'keys_unsorted | map(":-:") | join("|")' <<< "$results")|"
+        echo "| $ID | $(jq -r 'def icon: {success: "✅", failure: "❌", skipped: "⏭️", cancelled: "⚠️"}[.] // .; [.[]] | map(icon) | join(" | ")' <<< "$results") |"
         echo
       } >> "$GITHUB_STEP_SUMMARY"
 
