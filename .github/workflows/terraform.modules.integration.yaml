@@ -31,7 +31,7 @@ on:
         type: string
         required: false
         default: latest
-        description: "(Optional) The version of `terraform` to install with mise. A version prefix such as `1.13` installs the latest matching release. Defaults to `latest`."
+        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. A version prefix such as `1.13` installs the latest matching release. Defaults to `latest`."
       terraform_host:
         type: string
         required: false
@@ -41,12 +41,12 @@ on:
         type: string
         required: false
         default: latest
-        description: "(Optional) The version of `tflint` to install with mise. Defaults to `latest`."
+        description: "(Optional) The version of `tflint` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
       terraform_docs_version:
         type: string
         required: false
         default: latest
-        description: "(Optional) The version of `terraform-docs` to install with mise. Defaults to `latest`."
+        description: "(Optional) The version of `terraform-docs` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
 
       fmt_enabled:
         type: boolean
@@ -160,15 +160,28 @@ jobs:
       id: checkout
       uses: actions/checkout@v7
 
+    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
+    # still take precedence while a self-hosted runner's real global config is left untouched.
+    - name: Set Default Tool Versions
+      id: default-tools
+      env:
+        TERRAFORM_VERSION: ${{ inputs.terraform_version }}
+        TFLINT_VERSION: ${{ inputs.tflint_version }}
+        TERRAFORM_DOCS_VERSION: ${{ inputs.terraform_docs_version }}
+      run: |
+        config_file="$RUNNER_TEMP/mise-defaults.toml"
+        cat > "$config_file" <<TOML
+        [tools]
+        terraform = "$TERRAFORM_VERSION"
+        tflint = "$TFLINT_VERSION"
+        terraform-docs = "$TERRAFORM_DOCS_VERSION"
+        TOML
+
+        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
+
     - name: Set up tools
       id: setup-tools
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
-      with:
-        mise_toml: |
-          [tools]
-          terraform = "${{ inputs.terraform_version }}"
-          tflint = "${{ inputs.tflint_version }}"
-          terraform-docs = "${{ inputs.terraform_docs_version }}"
 
     - name: Configure Terraform Credentials
       id: configure-credentials
