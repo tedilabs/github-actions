@@ -1,4 +1,4 @@
-name: Terraform Modules - Integration
+name: Terraform Workspaces - Integration
 
 
 on:
@@ -17,21 +17,23 @@ on:
       paths:
         type: string
         required: false
-        default: |
-          modules/**
-          examples/**
-        description: "(Optional) File and directory patterns used to detect changed Terraform directories, one per line. Defaults to `modules/**` and `examples/**`."
-      paths_max_depth:
+        description: "(Optional) File and directory patterns used to detect changes, one per line. Defaults to the entire repository; changes outside a Terraform project are ignored anyway."
+      marker_file:
         type: string
         required: false
-        default: "2"
-        description: "(Optional) The maximum depth of the changed directories to check. For example, `modules/foo/bar.tf` with a max depth of `2` is checked as `modules/foo`. Defaults to `2`."
+        default: versions.tf
+        description: "(Optional) The file that identifies a Terraform project directory. Each changed path is resolved to the nearest directory containing it. Defaults to `versions.tf`."
+      workspace_exclude_dirs:
+        type: string
+        required: false
+        default: common,policies,files
+        description: "(Optional) A comma-separated list of project subdirectory names that are not workspaces. Every other subdirectory of a project is treated as a workspace, so a shared directory left out of this list becomes a bogus target whose `terraform validate` fails. Defaults to `common,policies,files`."
 
       terraform_version:
         type: string
         required: false
         default: latest
-        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. A version prefix such as `1.13` installs the latest matching release. Defaults to `latest`."
+        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
       terraform_host:
         type: string
         required: false
@@ -57,7 +59,7 @@ on:
         type: boolean
         required: false
         default: true
-        description: "(Optional) Whether to run `terraform init -backend=false` and `terraform validate`. Defaults to `true`."
+        description: "(Optional) Whether to run `terraform init -backend=false` and `terraform validate` with `TF_WORKSPACE` set to the target workspace. Defaults to `true`."
       tflint_enabled:
         type: boolean
         required: false
@@ -77,35 +79,21 @@ on:
         type: boolean
         required: false
         default: false
-        description: "(Optional) Whether `tflint` also lints nested directories under each changed directory that contain Terraform files. Defaults to `false`."
+        description: "(Optional) Whether `tflint` also lints nested directories under each project that contain Terraform files. Defaults to `false`."
       terraform_docs_enabled:
         type: boolean
         required: false
         default: false
-        description: "(Optional) Whether to check that `README.md` is up to date with `terraform-docs`. Directories without a `README.md` are skipped. The check only passes when CI reproduces the local generation: pin `terraform_docs_version` to the version used with pre-commit, and either commit `.terraform.lock.hcl` or set `settings.lockfile: false` in `.terraform-docs.yml` so the provider version column does not depend on a local lock file. Defaults to `false`."
+        description: "(Optional) Whether to check that the project `README.md` is up to date with `terraform-docs`. Projects without a `README.md` are skipped. Defaults to `false`."
       terraform_docs_config_file:
         type: string
         required: false
-        description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the module directory as usual."
+        description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the project directory as usual."
       terraform_docs_args:
         type: string
         required: false
         default: --sort-by required
         description: "(Optional) Additional arguments to pass to `terraform-docs`. Defaults to `--sort-by required`."
-      terraform_docs_recursive:
-        type: boolean
-        required: false
-        default: false
-        description: "(Optional) Whether `terraform-docs` also checks the submodules under `terraform_docs_recursive_path` of each changed directory. Defaults to `false`."
-      terraform_docs_recursive_path:
-        type: string
-        required: false
-        default: modules
-        description: "(Optional) The directory, relative to each changed directory, whose subdirectories are checked as submodules when `terraform_docs_recursive` is enabled. Defaults to `modules`."
-      terraform_docs_recursive_exclude:
-        type: string
-        required: false
-        description: "(Optional) A comma-separated list of submodule directories to exclude when `terraform_docs_recursive` is enabled, relative to `terraform_docs_recursive_path`."
 
       pr_comment_enabled:
         type: boolean
@@ -121,12 +109,12 @@ on:
 
 jobs:
   changed:
-    name: Detect Changed Directories
+    name: Detect Changed Workspaces
     runs-on: ${{ fromJson(inputs.runs_on) }}
 
     outputs:
-      has_directories: ${{ steps.changed-dirs.outputs.has_directories }}
-      directories: ${{ steps.changed-dirs.outputs.directories }}
+      has_targets: ${{ steps.changed-workspaces.outputs.has_targets }}
+      targets: ${{ steps.changed-workspaces.outputs.targets }}
 
     steps:
     - name: Checkout
@@ -140,20 +128,27 @@ jobs:
       uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
       with:
         paths: ${{ inputs.paths }}
-        max_depth: ${{ inputs.paths_max_depth }}
+
+    - name: Resolve Changed Workspaces
+      id: changed-workspaces
+      uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@main
+      with:
+        directories: ${{ steps.changed-dirs.outputs.directories }}
+        marker_file: ${{ inputs.marker_file }}
+        exclude_dirs: ${{ inputs.workspace_exclude_dirs }}
 
 
   lint:
-    name: Lint (${{ matrix.path }})
+    name: Lint (${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }})
     needs:
     - changed
-    if: needs.changed.outputs.has_directories == 'true'
+    if: needs.changed.outputs.has_targets == 'true'
     runs-on: ${{ fromJson(inputs.runs_on) }}
 
     strategy:
       fail-fast: false
       matrix:
-        path: ${{ fromJson(needs.changed.outputs.directories) }}
+        include: ${{ fromJson(needs.changed.outputs.targets) }}
 
     steps:
     - name: Checkout
@@ -196,7 +191,7 @@ jobs:
       continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.fmt@main
       with:
-        target_dir: ${{ matrix.path }}
+        target_dir: ${{ matrix.project }}
 
     - name: Validate
       id: validate
@@ -204,7 +199,8 @@ jobs:
       continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.validate@main
       with:
-        target_dir: ${{ matrix.path }}
+        target_dir: ${{ matrix.project }}
+        workspace: ${{ matrix.workspace }}
 
     - name: Lint (tflint)
       id: tflint
@@ -212,7 +208,7 @@ jobs:
       continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.tflint@main
       with:
-        target_dir: ${{ matrix.path }}
+        target_dir: ${{ matrix.project }}
         config_file: ${{ inputs.tflint_config_file }}
         minimum_failure_severity: ${{ inputs.tflint_minimum_failure_severity }}
         recursive: ${{ inputs.tflint_recursive }}
@@ -223,12 +219,9 @@ jobs:
       continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/terraform.docs@main
       with:
-        target_dir: ${{ matrix.path }}
+        target_dir: ${{ matrix.project }}
         check: "true"
         config_file: ${{ inputs.terraform_docs_config_file }}
-        recursive: ${{ inputs.terraform_docs_recursive }}
-        recursive_path: ${{ inputs.terraform_docs_recursive_path }}
-        recursive_exclude: ${{ inputs.terraform_docs_recursive_exclude }}
         args: ${{ inputs.terraform_docs_args }}
 
     - name: Collect Results
@@ -237,9 +230,9 @@ jobs:
       uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
       with:
         mode: collect
-        id: ${{ matrix.path }}
-        id_label: Directory
-        artifact_prefix: terraform-integration
+        id: ${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }}
+        id_label: Workspace
+        artifact_prefix: terraform-workspaces-integration
         job_status: ${{ job.status }}
         results: |
           {
@@ -255,7 +248,7 @@ jobs:
     needs:
     - changed
     - lint
-    if: always() && needs.changed.outputs.has_directories == 'true'
+    if: always() && needs.changed.outputs.has_targets == 'true'
     runs-on: ${{ fromJson(inputs.runs_on) }}
 
     steps:
@@ -264,8 +257,8 @@ jobs:
       uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
       with:
         mode: publish
-        id_label: Directory
-        artifact_prefix: terraform-integration
-        title: Terraform Integration
+        id_label: Workspace
+        artifact_prefix: terraform-workspaces-integration
+        title: Terraform Workspaces Integration
         pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
-        pr_comment_marker: terraform-integration
+        pr_comment_marker: terraform-workspaces-integration
