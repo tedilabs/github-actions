@@ -1,0 +1,44 @@
+name: MISC - Slug
+description: Turn an arbitrary string into a slug that is safe to use as an artifact or file name, keeping it unique with a short digest of the original.
+
+
+inputs:
+  value:
+    required: true
+    description: "(Required) The string to turn into a slug (e.g. `account/iam / master`)."
+  prefix:
+    required: false
+    description: "(Optional) A prefix prepended to the slug, separated by a hyphen (e.g. `terraform-plan`)."
+
+outputs:
+  slug:
+    value: ${{ steps.slug.outputs.slug }}
+    description: "The slug. Every character outside `A-Za-z0-9._-` is replaced by a hyphen, and a short digest of the original value is appended so two different inputs never collide."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Build Slug
+    id: slug
+    shell: bash
+    env:
+      VALUE: ${{ inputs.value }}
+      PREFIX: ${{ inputs.prefix }}
+    run: |
+      if [ -z "$VALUE" ]; then
+        echo "::error::Input 'value' is required."
+        exit 1
+      fi
+
+      body="$(printf '%s' "$VALUE" | tr -c 'A-Za-z0-9._-' '-')"
+      digest="$(printf '%s' "$VALUE" | shasum | cut -c1-8)"
+
+      slug="$body-$digest"
+      if [ -n "$PREFIX" ]; then
+        slug="$PREFIX-$slug"
+      fi
+
+      echo "Slug for '$VALUE': $slug"
+      echo "slug=$slug" >> "$GITHUB_OUTPUT"
