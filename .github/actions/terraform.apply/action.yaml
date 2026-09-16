@@ -54,7 +54,7 @@ runs:
 
   - name: Add Failure Details to Job Summary
     id: init-summary
-    if: steps.init.outcome == 'failure'
+    if: always() && steps.init.outcome == 'failure'
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
@@ -131,7 +131,7 @@ runs:
 
   - name: Add Failure Details to Job Summary
     id: apply-summary
-    if: steps.apply.outcome == 'failure'
+    if: always() && steps.apply.outcome == 'failure'
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform apply · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
