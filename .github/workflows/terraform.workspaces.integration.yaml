@@ -18,16 +18,26 @@ on:
         type: string
         required: false
         description: "(Optional) File and directory patterns used to detect changes, one per line. Defaults to the entire repository; changes outside a Terraform project are ignored anyway."
-      marker_file:
+      project_marker_file:
         type: string
         required: false
         default: versions.tf
         description: "(Optional) The file that identifies a Terraform project directory. Each changed path is resolved to the nearest directory containing it. Defaults to `versions.tf`."
+      project_mode:
+        type: string
+        required: false
+        default: auto
+        description: "(Optional) How a project maps to workspaces. `single-workspace` treats the project directory itself as the only workspace and never scans its subdirectories. `multi-workspace` treats subdirectories of the project as its workspaces. `auto` decides per project: a project holding `workspace_marker_file` is `single-workspace`, anything else is `multi-workspace`. Defaults to `auto`."
+      workspace_marker_file:
+        type: string
+        required: false
+        default: config.yaml
+        description: "(Optional) The file that identifies a workspace. In `multi-workspace` mode, only the subdirectories holding it are workspaces, which keeps shared directories such as `policies` out of the matrix without listing them. When no subdirectory holds it, the mode falls back to `workspace_exclude_dirs`. Set to an empty string to always use `workspace_exclude_dirs`. Defaults to `config.yaml`."
       workspace_exclude_dirs:
         type: string
         required: false
         default: common,policies,files
-        description: "(Optional) A comma-separated list of project subdirectory names that are not workspaces. Every other subdirectory of a project is treated as a workspace, so a shared directory left out of this list becomes a bogus target whose `terraform validate` fails. Defaults to `common,policies,files`."
+        description: "(Optional) A comma-separated list of project subdirectory names that are not workspaces. Only used in `multi-workspace` mode when `workspace_marker_file` finds nothing, where every other subdirectory is treated as a workspace. Defaults to `common,policies,files`."
 
       terraform_version:
         type: string
@@ -134,8 +144,10 @@ jobs:
       uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@main
       with:
         directories: ${{ steps.changed-dirs.outputs.directories }}
-        marker_file: ${{ inputs.marker_file }}
-        exclude_dirs: ${{ inputs.workspace_exclude_dirs }}
+        project_marker_file: ${{ inputs.project_marker_file }}
+        project_mode: ${{ inputs.project_mode }}
+        workspace_marker_file: ${{ inputs.workspace_marker_file }}
+        workspace_exclude_dirs: ${{ inputs.workspace_exclude_dirs }}
 
 
   lint:
