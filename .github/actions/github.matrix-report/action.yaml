@@ -200,7 +200,7 @@ runs:
   - name: Comment on Pull Request
     id: comment
     if: inputs.mode == 'publish' && inputs.pr_comment_enabled == 'true' && (github.event_name == 'pull_request' || inputs.pr_number != '') && steps.render.outputs.total != '0'
-    uses: tedilabs/github-actions/.github/actions/github.pr.sticky-comment@main
+    uses: tedilabs/github-actions/.github/actions/github.pr.sticky-comment@test/terraform-plan-apply
     continue-on-error: true
     with:
       marker: ${{ inputs.pr_comment_marker }}

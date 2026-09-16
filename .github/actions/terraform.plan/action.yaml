@@ -68,7 +68,7 @@ runs:
   - name: Add Failure Details to Job Summary
     id: init-summary
     if: always() && steps.init.outcome == 'failure'
-    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@test/terraform-plan-apply
     with:
       title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
       file: ${{ runner.temp }}/terraform-plan-init.log
@@ -220,7 +220,7 @@ runs:
   - name: Add Failure Details to Job Summary
     id: plan-summary
     if: always() && steps.plan.outcome == 'failure'
-    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@test/terraform-plan-apply
     with:
       title: "❌ terraform plan · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
       file: ${{ runner.temp }}/terraform-plan.log

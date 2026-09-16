@@ -106,13 +106,13 @@ jobs:
 
     - name: Get Changed Directories
       id: changed-dirs
-      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@test/terraform-plan-apply
       with:
         paths: ${{ inputs.paths }}
 
     - name: Resolve Changed Workspaces
       id: changed-workspaces
-      uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@main
+      uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@test/terraform-plan-apply
       with:
         directories: ${{ steps.changed-dirs.outputs.directories }}
         project_marker_file: ${{ inputs.project_marker_file }}
@@ -155,32 +155,32 @@ jobs:
 
     - name: Set up tools
       id: setup-tools
-      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@test/terraform-plan-apply
 
     - name: Configure Terraform Credentials
       id: configure-credentials
-      uses: tedilabs/github-actions/.github/actions/terraform.configure-credentials@main
+      uses: tedilabs/github-actions/.github/actions/terraform.configure-credentials@test/terraform-plan-apply
       with:
         host: ${{ inputs.terraform_host }}
         token: ${{ secrets.terraform_token }}
 
     - name: Configure Provider Credentials
       id: configure-providers
-      uses: tedilabs/github-actions/.github/actions/misc.export-env@main
+      uses: tedilabs/github-actions/.github/actions/misc.export-env@test/terraform-plan-apply
       with:
         env: ${{ secrets.provider_env }}
 
     - name: Configure AWS Credentials
       id: configure-aws
       if: inputs.aws_github_oidc_iam_role != ''
-      uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
+      uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@test/terraform-plan-apply
       with:
         aws_region: ${{ inputs.aws_region }}
         aws_github_oidc_iam_role: ${{ inputs.aws_github_oidc_iam_role }}
 
     - name: Resolve Artifact Name
       id: artifact
-      uses: tedilabs/github-actions/.github/actions/misc.slug@main
+      uses: tedilabs/github-actions/.github/actions/misc.slug@test/terraform-plan-apply
       with:
         prefix: terraform-plan
         value: ${{ matrix.project }}${{ matrix.workspace && format('/{0}', matrix.workspace) || '' }}
@@ -188,7 +188,7 @@ jobs:
     - name: Plan
       id: plan
       continue-on-error: true
-      uses: tedilabs/github-actions/.github/actions/terraform.plan@main
+      uses: tedilabs/github-actions/.github/actions/terraform.plan@test/terraform-plan-apply
       with:
         target_dir: ${{ matrix.project }}
         workspace: ${{ matrix.workspace }}
@@ -210,7 +210,7 @@ jobs:
     - name: Collect Results
       id: results
       if: always()
-      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@test/terraform-plan-apply
       with:
         mode: collect
         id: ${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }}
@@ -235,7 +235,7 @@ jobs:
     steps:
     - name: Publish Report
       id: report
-      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@test/terraform-plan-apply
       with:
         mode: publish
         id_label: Workspace
