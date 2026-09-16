@@ -1,0 +1,236 @@
+name: Terraform Workspaces - Plan
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      paths:
+        type: string
+        required: false
+        description: "(Optional) File and directory patterns used to detect changes, one per line. Defaults to the entire repository; changes outside a Terraform project are ignored anyway."
+      project_marker_file:
+        type: string
+        required: false
+        default: versions.tf
+        description: "(Optional) The file that identifies a Terraform project directory. Defaults to `versions.tf`."
+      project_mode:
+        type: string
+        required: false
+        default: auto
+        description: "(Optional) How a project maps to workspaces: `auto`, `single-workspace`, or `multi-workspace`. Defaults to `auto`."
+      workspace_marker_file:
+        type: string
+        required: false
+        default: config.yaml
+        description: "(Optional) The file that identifies a workspace. Defaults to `config.yaml`."
+      workspace_exclude_dirs:
+        type: string
+        required: false
+        default: common,policies,files
+        description: "(Optional) Subdirectory names that are not workspaces, used only when `workspace_marker_file` finds nothing. Defaults to `common,policies,files`."
+
+      terraform_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
+      terraform_host:
+        type: string
+        required: false
+        default: app.terraform.io
+        description: "(Optional) The hostname of the Terraform Cloud/Enterprise instance that the `terraform_token` secret authenticates to. Defaults to `app.terraform.io`."
+      plan_args:
+        type: string
+        required: false
+        description: "(Optional) Additional arguments to pass to `terraform plan` (e.g. `-refresh=false`)."
+      max_resources:
+        type: string
+        required: false
+        default: "50"
+        description: "(Optional) The maximum number of resource changes listed per workspace in the pull request comment. Defaults to `50`."
+
+      aws_region:
+        type: string
+        required: false
+        description: "(Optional) The AWS region to configure before planning. Only needed when the workspaces use the AWS provider."
+      aws_github_oidc_iam_role:
+        type: string
+        required: false
+        description: "(Optional) The ARN of the IAM role to assume through GitHub OIDC before planning. Requires the `id-token: write` permission on the caller. Leave empty when the providers of these workspaces do not need AWS credentials."
+
+      artifact_retention_days:
+        type: number
+        required: false
+        default: 5
+        description: "(Optional) How long the saved plan files are kept. A plan file can contain sensitive attribute values and is downloadable by anyone with read access to the repository, so keep this short. Defaults to `5`."
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the plan report as a single sticky comment on the pull request. Requires the `pull-requests: write` permission on the caller. Defaults to `true`."
+
+    secrets:
+      terraform_token:
+        required: false
+        description: "(Optional) The API token for the Terraform Cloud/Enterprise instance at `terraform_host`, used to reach the state backend and the private registry."
+
+
+jobs:
+  changed:
+    name: Detect Changed Workspaces
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    outputs:
+      has_targets: ${{ steps.changed-workspaces.outputs.has_targets }}
+      targets: ${{ steps.changed-workspaces.outputs.targets }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: changed-dirs
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      with:
+        paths: ${{ inputs.paths }}
+
+    - name: Resolve Changed Workspaces
+      id: changed-workspaces
+      uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@main
+      with:
+        directories: ${{ steps.changed-dirs.outputs.directories }}
+        project_marker_file: ${{ inputs.project_marker_file }}
+        project_mode: ${{ inputs.project_mode }}
+        workspace_marker_file: ${{ inputs.workspace_marker_file }}
+        workspace_exclude_dirs: ${{ inputs.workspace_exclude_dirs }}
+
+
+  plan:
+    name: Plan (${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }})
+    needs:
+    - changed
+    if: needs.changed.outputs.has_targets == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.changed.outputs.targets) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
+    # still take precedence while a self-hosted runner's real global config is left untouched.
+    - name: Set Default Tool Versions
+      id: default-tools
+      env:
+        TERRAFORM_VERSION: ${{ inputs.terraform_version }}
+      run: |
+        config_file="$RUNNER_TEMP/mise-defaults.toml"
+        cat > "$config_file" <<TOML
+        [tools]
+        terraform = "$TERRAFORM_VERSION"
+        TOML
+
+        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+
+    - name: Configure Terraform Credentials
+      id: configure-credentials
+      uses: tedilabs/github-actions/.github/actions/terraform.configure-credentials@main
+      with:
+        host: ${{ inputs.terraform_host }}
+        token: ${{ secrets.terraform_token }}
+
+    - name: Configure AWS Credentials
+      id: configure-aws
+      if: inputs.aws_github_oidc_iam_role != ''
+      uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
+      with:
+        aws_region: ${{ inputs.aws_region }}
+        aws_github_oidc_iam_role: ${{ inputs.aws_github_oidc_iam_role }}
+
+    - name: Resolve Artifact Name
+      id: artifact
+      uses: tedilabs/github-actions/.github/actions/misc.slug@main
+      with:
+        prefix: terraform-plan
+        value: ${{ matrix.project }}${{ matrix.workspace && format('/{0}', matrix.workspace) || '' }}
+
+    - name: Plan
+      id: plan
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.plan@main
+      with:
+        target_dir: ${{ matrix.project }}
+        workspace: ${{ matrix.workspace }}
+        plan_file: ${{ runner.temp }}/terraform.tfplan
+        args: ${{ inputs.plan_args }}
+        max_resources: ${{ inputs.max_resources }}
+
+    # The plan file is what makes the apply after the merge identical to the reviewed change.
+    - name: Upload Plan File
+      id: upload
+      if: steps.plan.outputs.plan_file_saved == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.artifact.outputs.slug }}
+        path: ${{ steps.plan.outputs.plan_file }}
+        retention-days: ${{ inputs.artifact_retention_days }}
+        if-no-files-found: error
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }}
+        id_label: Workspace
+        artifact_prefix: terraform-plan-report
+        job_status: ${{ job.status }}
+        details: ${{ steps.plan.outputs.summary }}
+        results: |
+          {
+            "plan": "${{ steps.plan.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - changed
+    - plan
+    if: always() && needs.changed.outputs.has_targets == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Workspace
+        artifact_prefix: terraform-plan-report
+        title: Terraform Plan
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: terraform-plan
