@@ -1,0 +1,276 @@
+name: Terraform Workspaces - Apply
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      plan_workflow:
+        type: string
+        required: true
+        description: "(Required) The file name of the caller's plan workflow (e.g. `terraform.plan.yaml`). Its run against the head of the merged pull request is where the plan files are downloaded from."
+
+      paths:
+        type: string
+        required: false
+        description: "(Optional) File and directory patterns used to detect changes, one per line. Defaults to the entire repository; changes outside a Terraform project are ignored anyway."
+      project_marker_file:
+        type: string
+        required: false
+        default: versions.tf
+        description: "(Optional) The file that identifies a Terraform project directory. Defaults to `versions.tf`."
+      project_mode:
+        type: string
+        required: false
+        default: auto
+        description: "(Optional) How a project maps to workspaces: `auto`, `single-workspace`, or `multi-workspace`. Defaults to `auto`."
+      workspace_marker_file:
+        type: string
+        required: false
+        default: config.yaml
+        description: "(Optional) The file that identifies a workspace. Defaults to `config.yaml`."
+      workspace_exclude_dirs:
+        type: string
+        required: false
+        default: common,policies,files
+        description: "(Optional) Subdirectory names that are not workspaces, used only when `workspace_marker_file` finds nothing. Defaults to `common,policies,files`."
+
+      terraform_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
+      terraform_host:
+        type: string
+        required: false
+        default: app.terraform.io
+        description: "(Optional) The hostname of the Terraform Cloud/Enterprise instance that the `terraform_token` secret authenticates to. Defaults to `app.terraform.io`."
+      apply_args:
+        type: string
+        required: false
+        description: "(Optional) Additional arguments to pass to `terraform apply`."
+
+      aws_region:
+        type: string
+        required: false
+        description: "(Optional) The AWS region to configure before applying. Only needed when the workspaces use the AWS provider."
+      aws_github_oidc_iam_role:
+        type: string
+        required: false
+        description: "(Optional) The ARN of the IAM role to assume through GitHub OIDC before applying. Requires the `id-token: write` permission on the caller."
+
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the apply report as a comment on the merged pull request. Requires the `pull-requests: write` permission on the caller. Defaults to `true`."
+
+    secrets:
+      terraform_token:
+        required: false
+        description: "(Optional) The API token for the Terraform Cloud/Enterprise instance at `terraform_host`, used to reach the state backend and the private registry."
+
+
+jobs:
+  changed:
+    name: Detect Changed Workspaces
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+
+    outputs:
+      has_targets: ${{ steps.changed-workspaces.outputs.has_targets }}
+      targets: ${{ steps.changed-workspaces.outputs.targets }}
+      pr_number: ${{ steps.plan-run.outputs.pr_number }}
+      plan_run_id: ${{ steps.plan-run.outputs.run_id }}
+      plan_run_found: ${{ steps.plan-run.outputs.found }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: changed-dirs
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      with:
+        paths: ${{ inputs.paths }}
+
+    - name: Resolve Changed Workspaces
+      id: changed-workspaces
+      uses: tedilabs/github-actions/.github/actions/terraform.changed-workspaces@main
+      with:
+        directories: ${{ steps.changed-dirs.outputs.directories }}
+        project_marker_file: ${{ inputs.project_marker_file }}
+        project_mode: ${{ inputs.project_mode }}
+        workspace_marker_file: ${{ inputs.workspace_marker_file }}
+        workspace_exclude_dirs: ${{ inputs.workspace_exclude_dirs }}
+
+    - name: Resolve Plan Run
+      id: plan-run
+      uses: tedilabs/github-actions/.github/actions/github.pr.head-run@main
+      with:
+        workflow: ${{ inputs.plan_workflow }}
+
+    - name: Report a Missing Plan Run
+      id: guard
+      if: steps.changed-workspaces.outputs.has_targets == 'true' && steps.plan-run.outputs.found != 'true'
+      run: |
+        echo "::error::No plan run was found for the merged pull request, so there is no reviewed plan to apply. Re-run the plan on a new pull request."
+        exit 1
+
+
+  apply:
+    name: Apply (${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }})
+    needs:
+    - changed
+    if: needs.changed.outputs.has_targets == 'true' && needs.changed.outputs.plan_run_found == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+
+    # Two applies of the same workspace must never overlap, whatever else is in flight.
+    concurrency:
+      group: terraform-apply-${{ github.repository }}-${{ matrix.project }}-${{ matrix.workspace }}
+      cancel-in-progress: false
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.changed.outputs.targets) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
+    # still take precedence while a self-hosted runner's real global config is left untouched.
+    - name: Set Default Tool Versions
+      id: default-tools
+      env:
+        TERRAFORM_VERSION: ${{ inputs.terraform_version }}
+      run: |
+        config_file="$RUNNER_TEMP/mise-defaults.toml"
+        cat > "$config_file" <<TOML
+        [tools]
+        terraform = "$TERRAFORM_VERSION"
+        TOML
+
+        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+
+    - name: Configure Terraform Credentials
+      id: configure-credentials
+      uses: tedilabs/github-actions/.github/actions/terraform.configure-credentials@main
+      with:
+        host: ${{ inputs.terraform_host }}
+        token: ${{ secrets.terraform_token }}
+
+    - name: Configure AWS Credentials
+      id: configure-aws
+      if: inputs.aws_github_oidc_iam_role != ''
+      uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
+      with:
+        aws_region: ${{ inputs.aws_region }}
+        aws_github_oidc_iam_role: ${{ inputs.aws_github_oidc_iam_role }}
+
+    - name: Resolve Artifact Name
+      id: artifact
+      uses: tedilabs/github-actions/.github/actions/misc.slug@main
+      with:
+        prefix: terraform-plan
+        value: ${{ matrix.project }}${{ matrix.workspace && format('/{0}', matrix.workspace) || '' }}
+
+    - name: Download Plan File
+      id: download
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ steps.artifact.outputs.slug }}
+        path: ${{ runner.temp }}/plan
+        run-id: ${{ needs.changed.outputs.plan_run_id }}
+        github-token: ${{ github.token }}
+
+    - name: Report a Missing Plan File
+      id: missing
+      if: steps.download.outcome == 'failure'
+      env:
+        PLAN_RUN_ID: ${{ needs.changed.outputs.plan_run_id }}
+      run: |
+        echo "::error::No plan file was uploaded for this workspace by run $PLAN_RUN_ID. It either failed to plan, or it runs with remote execution, which cannot save a plan."
+        exit 1
+
+    - name: Apply
+      id: apply
+      if: steps.download.outcome == 'success'
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.apply@main
+      with:
+        target_dir: ${{ matrix.project }}
+        workspace: ${{ matrix.workspace }}
+        plan_file: ${{ runner.temp }}/plan/terraform.tfplan
+        args: ${{ inputs.apply_args }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ matrix.project }}${{ matrix.workspace && format(' / {0}', matrix.workspace) || '' }}
+        id_label: Workspace
+        artifact_prefix: terraform-apply-report
+        job_status: ${{ job.status }}
+        details: ${{ steps.apply.outputs.summary }}
+        results: |
+          {
+            "apply": "${{ steps.apply.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - changed
+    - apply
+    if: always() && needs.changed.outputs.has_targets == 'true' && needs.changed.outputs.plan_run_found == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Workspace
+        artifact_prefix: terraform-apply-report
+        title: Terraform Apply
+        pr_number: ${{ needs.changed.outputs.pr_number }}
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: terraform-apply
