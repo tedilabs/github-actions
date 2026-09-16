@@ -6,14 +6,22 @@ inputs:
   directories:
     required: true
     description: "(Required) A JSON array of changed directories, typically the `directories` output of the `git.changed-dirs` action."
-  marker_file:
+  project_marker_file:
     required: false
     default: versions.tf
     description: "(Optional) The file that identifies a Terraform project directory. Each changed directory is resolved to the nearest directory, itself or an ancestor, that contains this file. Directories without one are skipped. Defaults to `versions.tf`."
-  exclude_dirs:
+  project_mode:
+    required: false
+    default: auto
+    description: "(Optional) How a project maps to workspaces. `single-workspace` treats the project directory itself as the only workspace and never scans its subdirectories. `multi-workspace` treats subdirectories of the project as its workspaces. `auto` decides per project: a project holding `workspace_marker_file` is `single-workspace`, anything else is `multi-workspace`. Defaults to `auto`."
+  workspace_marker_file:
+    required: false
+    default: config.yaml
+    description: "(Optional) The file that identifies a workspace. In `multi-workspace` mode, only the subdirectories holding it are workspaces, which keeps shared directories out of the matrix without listing them. When no subdirectory holds it, the mode falls back to `workspace_exclude_dirs`. Set to an empty string to always use `workspace_exclude_dirs`. Defaults to `config.yaml`."
+  workspace_exclude_dirs:
     required: false
     default: common,policies,files
-    description: "(Optional) A comma-separated list of subdirectory names that are not workspaces. Hidden directories such as `.terraform` are always excluded. Every other subdirectory of a project is treated as a workspace, so a shared directory left out of this list becomes a bogus target. Defaults to `common,policies,files`."
+    description: "(Optional) A comma-separated list of subdirectory names that are not workspaces. Only used in `multi-workspace` mode when `workspace_marker_file` finds nothing, where every other non-hidden subdirectory is treated as a workspace. Hidden directories such as `.terraform` are always excluded. Defaults to `common,policies,files`."
 
 outputs:
   has_targets:
@@ -21,7 +29,7 @@ outputs:
     description: "Whether `targets` is non-empty. `true` or `false`."
   targets:
     value: ${{ steps.resolve.outputs.targets }}
-    description: "A JSON array of `{\"project\": ..., \"workspace\": ...}` objects for `strategy.matrix.include`. A change under `<project>/<workspace>/` targets that workspace only; any other change under `<project>/` targets every workspace of the project. A project without workspace directories yields one target with an empty `workspace`."
+    description: "A JSON array of `{\"project\": ..., \"workspace\": ...}` objects for `strategy.matrix.include`. A single-workspace project yields one target with an empty `workspace`. For a multi-workspace project, a change under `<project>/<workspace>/` targets that workspace only, and any other change under `<project>/` targets every workspace of the project."
 
 
 runs:
@@ -33,10 +41,20 @@ runs:
     shell: bash
     env:
       DIRECTORIES: ${{ inputs.directories }}
-      MARKER_FILE: ${{ inputs.marker_file }}
-      EXCLUDE_DIRS: ${{ inputs.exclude_dirs }}
+      PROJECT_MARKER_FILE: ${{ inputs.project_marker_file }}
+      PROJECT_MODE: ${{ inputs.project_mode }}
+      WORKSPACE_MARKER_FILE: ${{ inputs.workspace_marker_file }}
+      WORKSPACE_EXCLUDE_DIRS: ${{ inputs.workspace_exclude_dirs }}
     run: |
-      IFS=',' read -ra exclude_dirs <<< "$EXCLUDE_DIRS"
+      case "$PROJECT_MODE" in
+        auto|single-workspace|multi-workspace) ;;
+        *)
+          echo "::error::Invalid project_mode: $PROJECT_MODE. Valid values are auto, single-workspace, or multi-workspace."
+          exit 1
+          ;;
+      esac
+
+      IFS=',' read -ra exclude_dirs <<< "$WORKSPACE_EXCLUDE_DIRS"
 
       is_excluded() {
         local name="$1" excluded
@@ -49,14 +67,48 @@ runs:
         return 1
       }
 
-      # Every non-hidden, non-excluded subdirectory of a project is a workspace.
-      list_workspaces() {
+      # Subdirectories holding the workspace marker. Hidden ones never match, as `*/` skips them.
+      list_marked_workspaces() {
+        local project="$1" path
+        shopt -s nullglob
+        [ -n "$WORKSPACE_MARKER_FILE" ] || return 0
+        for path in "$project"/*/; do
+          [ -f "$path/$WORKSPACE_MARKER_FILE" ] && basename "$path"
+        done
+        return 0
+      }
+
+      # Fallback for projects that do not mark their workspaces: every non-excluded subdirectory.
+      list_remaining_workspaces() {
         local project="$1" path name
         shopt -s nullglob
         for path in "$project"/*/; do
           name="$(basename "$path")"
           is_excluded "$name" || echo "$name"
         done
+        return 0
+      }
+
+      # Prints one workspace name per line. No output means the project itself is the only workspace.
+      list_workspaces() {
+        local project="$1" mode="$PROJECT_MODE" marked
+
+        if [ "$mode" = "auto" ]; then
+          if [ -n "$WORKSPACE_MARKER_FILE" ] && [ -f "$project/$WORKSPACE_MARKER_FILE" ]; then
+            mode="single-workspace"
+          else
+            mode="multi-workspace"
+          fi
+        fi
+
+        [ "$mode" = "single-workspace" ] && return 0
+
+        marked="$(list_marked_workspaces "$project")"
+        if [ -n "$marked" ]; then
+          printf '%s\n' "$marked"
+        else
+          list_remaining_workspaces "$project"
+        fi
       }
 
       targets="[]"
@@ -67,11 +119,11 @@ runs:
       while IFS= read -r dir; do
         [ -z "$dir" ] && continue
 
-        # Walk up from the changed directory to the nearest directory containing the marker file.
+        # Walk up from the changed directory to the nearest directory containing the project marker file.
         project=""
         current="$dir"
         while :; do
-          if [ -f "$current/$MARKER_FILE" ]; then
+          if [ -f "$current/$PROJECT_MARKER_FILE" ]; then
             project="$current"
             break
           fi
@@ -80,17 +132,17 @@ runs:
         done
 
         if [ -z "$project" ]; then
-          echo "Skipping $dir: no $MARKER_FILE in the directory or its parents."
+          echo "Skipping $dir: no $PROJECT_MARKER_FILE in the directory or its parents."
           continue
         fi
 
         workspaces=()
         while IFS= read -r name; do
-          workspaces+=("$name")
+          [ -n "$name" ] && workspaces+=("$name")
         done < <(list_workspaces "$project")
 
         if [ "${#workspaces[@]}" -eq 0 ]; then
-          echo "$dir -> $project (no workspace directories)"
+          echo "$dir -> $project (the project is the workspace)"
           add_target "$project" ""
           continue
         fi
