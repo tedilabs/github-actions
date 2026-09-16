@@ -1,0 +1,139 @@
+name: Terraform - Apply
+description: Apply a saved Terraform plan file and render a readable summary of what changed. On failure, the output is added to the job summary. Requires the `terraform` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Terraform project directory to apply. Defaults to `./`."
+  workspace:
+    required: false
+    description: "(Optional) The Terraform workspace to apply to, exported as `TF_WORKSPACE`. Defaults to Terraform's `default` workspace."
+  plan_file:
+    required: true
+    description: "(Required) The path of the plan file to apply, as saved by the `terraform.plan` action. Applying a saved plan is what keeps the change reviewed in the pull request identical to the change applied."
+  args:
+    required: false
+    description: "(Optional) Additional arguments to pass to `terraform apply`."
+
+outputs:
+  added:
+    value: ${{ steps.apply.outputs.added }}
+    description: "The number of resources added."
+  changed:
+    value: ${{ steps.apply.outputs.changed }}
+    description: "The number of resources changed."
+  destroyed:
+    value: ${{ steps.apply.outputs.destroyed }}
+    description: "The number of resources destroyed."
+  stale:
+    value: ${{ steps.apply.outputs.stale }}
+    description: "`true` when the apply was rejected because the state moved after the plan was saved. The change needs a fresh plan rather than a retry."
+  summary:
+    value: ${{ steps.apply.outputs.summary }}
+    description: "A Markdown summary of the apply, suitable for a job summary or a pull request comment."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Terraform Init
+    id: init
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+    run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
+      terraform -chdir="$TARGET_DIR" init -input=false -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-apply-init.log"
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ runner.temp }}/terraform-apply-init.log
+      lang: text
+
+  - name: Terraform Apply
+    id: apply
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+      PLAN_FILE: ${{ inputs.plan_file }}
+      ARGS: ${{ inputs.args }}
+    run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
+      if [ ! -f "$PLAN_FILE" ]; then
+        echo "::error::Plan file not found: $PLAN_FILE"
+        exit 1
+      fi
+
+      log="$RUNNER_TEMP/terraform-apply.log"
+      read -ra extra_args <<< "$ARGS"
+
+      set +e
+      terraform -chdir="$TARGET_DIR" apply \
+        -input=false \
+        -no-color \
+        "${extra_args[@]}" \
+        "$PLAN_FILE" 2>&1 | tee "$log"
+      exit_code="${PIPESTATUS[0]}"
+      set -e
+
+      # Terraform refuses a saved plan once the state has moved on, which is a normal race
+      # between merging and applying rather than a broken change.
+      stale=false
+      if [ "$exit_code" -ne 0 ] && grep -qiE "saved plan is stale|plan is no longer valid" "$log"; then
+        stale=true
+      fi
+      echo "stale=$stale" >> "$GITHUB_OUTPUT"
+
+      # `Apply complete! Resources: 1 added, 2 changed, 3 destroyed.`
+      read -r added changed destroyed <<< "$(
+        sed -n 's/^Apply complete! Resources: \([0-9]*\) added, \([0-9]*\) changed, \([0-9]*\) destroyed\..*/\1 \2 \3/p' "$log" | tail -1
+      )"
+      added="${added:-0}"; changed="${changed:-0}"; destroyed="${destroyed:-0}"
+      {
+        echo "added=$added"
+        echo "changed=$changed"
+        echo "destroyed=$destroyed"
+      } >> "$GITHUB_OUTPUT"
+
+      if [ "$exit_code" -ne 0 ]; then
+        if [ "$stale" = "true" ]; then
+          summary="> [!WARNING]"$'\n'"> The saved plan no longer matches the state, so nothing was applied. Re-run the plan and apply the new one."
+        else
+          summary="> [!CAUTION]"$'\n'"> The apply failed. See the job summary for the output."
+        fi
+      else
+        summary="**$added** added, **$changed** changed, **$destroyed** destroyed."
+      fi
+
+      {
+        echo "summary<<TERRAFORM_APPLY_EOF"
+        echo "$summary"
+        echo "TERRAFORM_APPLY_EOF"
+      } >> "$GITHUB_OUTPUT"
+
+      echo "$summary"
+      exit "$exit_code"
+
+  - name: Add Failure Details to Job Summary
+    id: apply-summary
+    if: steps.apply.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform apply · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ runner.temp }}/terraform-apply.log
+      lang: text
