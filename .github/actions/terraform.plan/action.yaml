@@ -1,0 +1,202 @@
+name: Terraform - Plan
+description: Run `terraform plan` against a workspace, save the plan file, and render a readable summary of what would change. On failure, the output is added to the job summary. Requires the `terraform` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Terraform project directory to plan. Defaults to `./`."
+  workspace:
+    required: false
+    description: "(Optional) The Terraform workspace to plan against, exported as `TF_WORKSPACE`. Defaults to Terraform's `default` workspace."
+  plan_file:
+    required: false
+    description: "(Optional) The path the plan file is written to. Defaults to a file under `RUNNER_TEMP`, which keeps it out of the checkout so it is never committed or linted."
+  args:
+    required: false
+    description: "(Optional) Additional arguments to pass to `terraform plan` (e.g. `-refresh=false`)."
+  max_resources:
+    required: false
+    default: "50"
+    description: "(Optional) The maximum number of resource changes listed in the summary. Beyond it the list is truncated with a note, so one large workspace cannot fill a pull request comment. Defaults to `50`."
+
+outputs:
+  has_changes:
+    value: ${{ steps.plan.outputs.has_changes }}
+    description: "Whether the plan contains changes to apply. `true` or `false`."
+  plan_file:
+    value: ${{ steps.plan.outputs.plan_file }}
+    description: "The path of the saved plan file. Empty when the plan failed, or when the backend refused to save one."
+  plan_file_saved:
+    value: ${{ steps.plan.outputs.plan_file_saved }}
+    description: "Whether a plan file was saved. `false` when the workspace runs with remote execution, where the plan cannot be saved locally and so cannot be applied later."
+  create:
+    value: ${{ steps.plan.outputs.create }}
+    description: "The number of resources to be created."
+  update:
+    value: ${{ steps.plan.outputs.update }}
+    description: "The number of resources to be updated in place."
+  destroy:
+    value: ${{ steps.plan.outputs.destroy }}
+    description: "The number of resources to be destroyed."
+  replace:
+    value: ${{ steps.plan.outputs.replace }}
+    description: "The number of resources to be replaced."
+  summary:
+    value: ${{ steps.plan.outputs.summary }}
+    description: "A Markdown summary of the plan, suitable for a job summary or a pull request comment."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Terraform Init
+    id: init
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+    run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
+      terraform -chdir="$TARGET_DIR" init -input=false -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-plan-init.log"
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ runner.temp }}/terraform-plan-init.log
+      lang: text
+
+  - name: Terraform Plan
+    id: plan
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+      PLAN_FILE: ${{ inputs.plan_file }}
+      ARGS: ${{ inputs.args }}
+      MAX_RESOURCES: ${{ inputs.max_resources }}
+    run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
+      plan_file="${PLAN_FILE:-$RUNNER_TEMP/terraform.tfplan}"
+      log="$RUNNER_TEMP/terraform-plan.log"
+      read -ra extra_args <<< "$ARGS"
+
+      # `-detailed-exitcode` returns 0 for no changes, 1 for an error, and 2 when there are changes.
+      set +e
+      terraform -chdir="$TARGET_DIR" plan \
+        -out="$plan_file" \
+        -input=false \
+        -lock=false \
+        -no-color \
+        -detailed-exitcode \
+        "${extra_args[@]}" 2>&1 | tee "$log"
+      exit_code="${PIPESTATUS[0]}"
+      set -e
+
+      # A workspace with remote execution cannot save a plan file. Fall back to a plan without
+      # `-out` so the change is still reported, and mark it as not applicable from a plan file.
+      plan_file_saved=true
+      if [ "$exit_code" -eq 1 ] && grep -q "not support saving" "$log"; then
+        echo "::warning::The backend refuses to save a plan file, which means remote execution. Re-planning without one; this workspace cannot be applied from a saved plan."
+        plan_file_saved=false
+        plan_file=""
+        set +e
+        terraform -chdir="$TARGET_DIR" plan \
+          -input=false \
+          -lock=false \
+          -no-color \
+          -detailed-exitcode \
+          "${extra_args[@]}" 2>&1 | tee "$log"
+        exit_code="${PIPESTATUS[0]}"
+        set -e
+      fi
+
+      {
+        echo "plan_file=$plan_file"
+        echo "plan_file_saved=$plan_file_saved"
+      } >> "$GITHUB_OUTPUT"
+
+      if [ "$exit_code" -eq 1 ]; then
+        echo "::error::terraform plan failed."
+        exit 1
+      fi
+
+      if [ "$exit_code" -eq 2 ]; then
+        has_changes=true
+      else
+        has_changes=false
+      fi
+      echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+
+      # Counts and the resource list come from the machine-readable plan, never from the log text.
+      if [ -n "$plan_file" ]; then
+        terraform -chdir="$TARGET_DIR" show -json "$plan_file" > "$RUNNER_TEMP/terraform-plan.json"
+      else
+        echo '{}' > "$RUNNER_TEMP/terraform-plan.json"
+      fi
+
+      counts="$(jq -c '
+        [(.resource_changes // [])[] | .change.actions] as $a
+        | {
+            create:  ($a | map(select(. == ["create"])) | length),
+            update:  ($a | map(select(. == ["update"])) | length),
+            destroy: ($a | map(select(. == ["delete"])) | length),
+            replace: ($a | map(select(. == ["delete","create"] or . == ["create","delete"])) | length)
+          }
+      ' "$RUNNER_TEMP/terraform-plan.json")"
+      jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "$counts" >> "$GITHUB_OUTPUT"
+
+      if [ -z "$plan_file" ]; then
+        # Without a plan file there is nothing machine-readable to summarise, so say so plainly
+        # rather than rendering an empty table that would read as "no changes".
+        summary="> [!WARNING]"$'\n'"> This workspace runs with remote execution, so no plan file was saved."$'\n'"> The plan output is in the job log, and this workspace cannot be applied from a saved plan."
+      else
+      summary="$(jq -r --argjson counts "$counts" --argjson max "$MAX_RESOURCES" --arg saved "$plan_file_saved" '
+        def symbol:
+          if   . == ["create"] then "+"
+          elif . == ["update"] then "~"
+          elif . == ["delete"] then "-"
+          elif . == ["delete","create"] or . == ["create","delete"] then "±"
+          else "?" end;
+        [(.resource_changes // [])[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $rows
+        | if ($rows | length) == 0 then
+            "No changes. The infrastructure matches the configuration."
+          else
+            "**\($counts.create)** to add, **\($counts.update)** to change, **\($counts.destroy)** to destroy, **\($counts.replace)** to replace.",
+            "",
+            "| | Resource |",
+            "|:-:|---|",
+            ($rows[0:$max][] | "| `\(.change.actions | symbol)` | `\(.address)` |"),
+            (if ($rows | length) > $max then "\n… and \(($rows | length) - $max) more." else empty end),
+            (if $saved == "false" then "\n> [!WARNING]\n> This workspace runs remotely, so no plan file was saved and it cannot be applied from one." else empty end)
+          end
+      ' "$RUNNER_TEMP/terraform-plan.json")"
+      fi
+
+      {
+        echo "summary<<TERRAFORM_PLAN_EOF"
+        echo "$summary"
+        echo "TERRAFORM_PLAN_EOF"
+      } >> "$GITHUB_OUTPUT"
+
+      echo "$summary"
+
+  - name: Add Failure Details to Job Summary
+    id: plan-summary
+    if: steps.plan.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform plan · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ runner.temp }}/terraform-plan.log
+      lang: text
