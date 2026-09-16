@@ -83,6 +83,9 @@ on:
       terraform_token:
         required: false
         description: "(Optional) The API token for the Terraform Cloud/Enterprise instance at `terraform_host`, used to reach the state backend and the private registry."
+      provider_env:
+        required: false
+        description: "(Optional) Credentials the Terraform providers read from the environment, one `KEY=value` per line, where each value comes from a secret of the caller. A reusable workflow cannot know which providers a repository uses, so this is the seam for the ones that are not AWS. Every value is masked, and a line whose value is empty is skipped."
 
 
 jobs:
@@ -160,6 +163,12 @@ jobs:
       with:
         host: ${{ inputs.terraform_host }}
         token: ${{ secrets.terraform_token }}
+
+    - name: Configure Provider Credentials
+      id: configure-providers
+      uses: tedilabs/github-actions/.github/actions/misc.export-env@main
+      with:
+        env: ${{ secrets.provider_env }}
 
     - name: Configure AWS Credentials
       id: configure-aws
