@@ -1,0 +1,42 @@
+name: Test - Shell Run Nested
+description: Temporary fixture. Calls `shell.run` from inside a composite action with `env` on the `uses` step, to verify that the env is inherited and that the outputs survive a failing nested step.
+
+
+inputs:
+  message:
+    required: true
+    description: "(Required) A value passed to the nested script through `env`."
+
+outputs:
+  stdout:
+    value: ${{ steps.run.outputs.stdout }}
+    description: "STDOUT of the nested script."
+  stderr:
+    value: ${{ steps.run.outputs.stderr }}
+    description: "STDERR of the nested script."
+  exitcode:
+    value: ${{ steps.run.outputs.exitcode }}
+    description: "Exit code of the nested script."
+  log_file:
+    value: ${{ steps.run.outputs.log_file }}
+    description: "Combined log file of the nested script."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Run Nested
+    id: run
+    uses: tedilabs/github-actions/.github/actions/shell.run@test/shell-run-env
+    env:
+      MESSAGE: ${{ inputs.message }}
+      SECRET_LIKE: ${{ github.token }}
+    with:
+      working_directory: .github
+      run: |
+        echo "env=$MESSAGE"
+        echo "cwd=$(basename "$PWD")"
+        [ -n "$SECRET_LIKE" ] && echo "token=present"
+        echo "oops" >&2
+        exit 3

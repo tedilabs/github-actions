@@ -1,0 +1,49 @@
+name: Test - Shell Run Env
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Call Nested Action
+      id: nested
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/test.shell-run-nested@test/shell-run-env
+      with:
+        message: hello
+
+    - name: Assert
+      id: assert
+      env:
+        OUTCOME: ${{ steps.nested.outcome }}
+        STDOUT: ${{ steps.nested.outputs.stdout }}
+        STDERR: ${{ steps.nested.outputs.stderr }}
+        EXITCODE: ${{ steps.nested.outputs.exitcode }}
+        LOG_FILE: ${{ steps.nested.outputs.log_file }}
+      run: |
+        echo "outcome=$OUTCOME"
+        echo "exitcode=$EXITCODE"
+        echo "log_file=$LOG_FILE"
+        echo "--- stdout ---"; printf '%s\n' "$STDOUT"
+        echo "--- stderr ---"; printf '%s\n' "$STDERR"
+
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$OUTCOME" "failure" "nested step outcome is failure"
+        check "$EXITCODE" "3" "exitcode propagates through two composite levels"
+        check "$STDOUT" "$(printf 'env=hello\ncwd=.github\ntoken=present')" "env on uses step is inherited and working_directory applies"
+        check "$STDERR" "oops" "stderr is captured separately"
+        if [ -f "$LOG_FILE" ]; then echo "PASS log_file exists in the caller job"; else echo "FAIL log_file missing: $LOG_FILE"; failed=1; fi
+        exit "$failed"
