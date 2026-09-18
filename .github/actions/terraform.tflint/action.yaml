@@ -82,6 +82,8 @@ runs:
         echo "::warning::tflint config file not found: $CONFIG_FILE. Linting with the tflint defaults."
       fi
 
+      tflint --version
+
   - name: Cache TFLint Plugins
     id: cache
     if: inputs.cache == 'true' && steps.target.outputs.skipped != 'true'
@@ -93,39 +95,23 @@ runs:
   - name: Init TFLint
     id: init
     if: steps.target.outputs.skipped != 'true'
-    shell: bash
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
       GITHUB_TOKEN: ${{ inputs.github_token }}
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       CONFIG: ${{ steps.target.outputs.config }}
       RECURSIVE: ${{ inputs.recursive }}
-    run: |
-      args=(--chdir "$TARGET_DIR")
-      if [ -n "$CONFIG" ]; then
-        args+=(--config "$CONFIG")
-      fi
-      if [ "$RECURSIVE" = "true" ]; then
-        args+=(--recursive)
-      fi
+    with:
+      run: |
+        args=(--chdir "$TARGET_DIR")
+        if [ -n "$CONFIG" ]; then
+          args+=(--config "$CONFIG")
+        fi
+        if [ "$RECURSIVE" = "true" ]; then
+          args+=(--recursive)
+        fi
 
-      tflint --version
-
-      # Capture the streams separately and defer the exit so the outputs are written even on failure.
-      out="$RUNNER_TEMP/tflint-init.stdout"
-      err="$RUNNER_TEMP/tflint-init.stderr"
-      exitcode=0
-      tflint "${args[@]}" --init > "$out" 2> "$err" || exitcode=$?
-      cat "$out"
-      cat "$err" >&2
-      cat "$out" "$err" > "$RUNNER_TEMP/tflint-init.log"
-
-      delimiter="$(head -c 15 /dev/urandom | base64)"
-      {
-        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
-        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
-        echo "exitcode=$exitcode"
-      } >> "$GITHUB_OUTPUT"
-      exit "$exitcode"
+        tflint "${args[@]}" --init
 
   - name: Add Failure Details to Job Summary
     id: init-summary
@@ -133,46 +119,32 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ tflint --init · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/tflint-init.log
+      file: ${{ steps.init.outputs.log_file }}
       lang: text
 
   - name: Run TFLint
     id: tflint
     if: steps.target.outputs.skipped != 'true'
-    shell: bash
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       CONFIG: ${{ steps.target.outputs.config }}
       RECURSIVE: ${{ inputs.recursive }}
       MINIMUM_FAILURE_SEVERITY: ${{ inputs.minimum_failure_severity }}
       FORMAT: ${{ inputs.format }}
-    run: |
-      args=(--chdir "$TARGET_DIR")
-      if [ -n "$CONFIG" ]; then
-        args+=(--config "$CONFIG")
-      fi
-      if [ "$RECURSIVE" = "true" ]; then
-        args+=(--recursive)
-      fi
+    with:
+      run: |
+        args=(--chdir "$TARGET_DIR")
+        if [ -n "$CONFIG" ]; then
+          args+=(--config "$CONFIG")
+        fi
+        if [ "$RECURSIVE" = "true" ]; then
+          args+=(--recursive)
+        fi
 
-      # Capture the streams separately and defer the exit so the outputs are written even on failure.
-      out="$RUNNER_TEMP/tflint.stdout"
-      err="$RUNNER_TEMP/tflint.stderr"
-      exitcode=0
-      tflint "${args[@]}" \
-        --format "$FORMAT" \
-        --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY" > "$out" 2> "$err" || exitcode=$?
-      cat "$out"
-      cat "$err" >&2
-      cat "$out" "$err" > "$RUNNER_TEMP/tflint.log"
-
-      delimiter="$(head -c 15 /dev/urandom | base64)"
-      {
-        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
-        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
-        echo "exitcode=$exitcode"
-      } >> "$GITHUB_OUTPUT"
-      exit "$exitcode"
+        tflint "${args[@]}" \
+          --format "$FORMAT" \
+          --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY"
 
   - name: Add Failure Details to Job Summary
     id: tflint-summary
@@ -180,5 +152,5 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ tflint · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/tflint.log
+      file: ${{ steps.tflint.outputs.log_file }}
       lang: text

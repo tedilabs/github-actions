@@ -1,0 +1,64 @@
+name: Shell - Run
+description: "Run a bash script and expose its STDOUT, STDERR, and exit code as outputs, like the `hashicorp/setup-terraform` wrapper. The step still fails on a non-zero exit code, so use `continue-on-error: true` on the caller to inspect the outputs."
+
+
+inputs:
+  run:
+    required: true
+    description: "(Required) The bash script to run. It runs with `bash --noprofile --norc -eo pipefail`, like a `run` step, and sees the `env` of the calling step."
+  working_directory:
+    required: false
+    description: "(Optional) The directory to run the script in. Defaults to the workspace."
+
+outputs:
+  stdout:
+    value: ${{ steps.run.outputs.stdout }}
+    description: "The STDOUT stream of the script."
+  stderr:
+    value: ${{ steps.run.outputs.stderr }}
+    description: "The STDERR stream of the script."
+  exitcode:
+    value: ${{ steps.run.outputs.exitcode }}
+    description: "The exit code of the script."
+  log_file:
+    value: ${{ steps.run.outputs.log_file }}
+    description: "The path of a file holding STDOUT followed by STDERR, for use with `github.step-summary`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Run Script
+    id: run
+    shell: bash
+    env:
+      SCRIPT: ${{ inputs.run }}
+      WORKING_DIRECTORY: ${{ inputs.working_directory }}
+    run: |
+      # A unique prefix keeps the files of several calls in one job apart.
+      prefix="$RUNNER_TEMP/shell-run-$(head -c 15 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
+      script="$prefix.sh"
+      out="$prefix.stdout"
+      err="$prefix.stderr"
+      log="$prefix.log"
+      printf '%s\n' "$SCRIPT" > "$script"
+
+      # Capture the streams separately and defer the exit so the outputs are written even on failure.
+      exitcode=0
+      (
+        cd "${WORKING_DIRECTORY:-.}"
+        bash --noprofile --norc -eo pipefail "$script"
+      ) > "$out" 2> "$err" || exitcode=$?
+      cat "$out"
+      cat "$err" >&2
+      cat "$out" "$err" > "$log"
+
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
+        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
+        echo "exitcode=$exitcode"
+        echo "log_file=$log"
+      } >> "$GITHUB_OUTPUT"
+      exit "$exitcode"
