@@ -15,6 +15,16 @@ outputs:
   skipped:
     value: ${{ steps.target.outputs.skipped }}
     description: "`true` when `target_dir` holds no Terraform files and neither `terraform init` nor `terraform validate` was run. Empty otherwise."
+  # When `terraform init` fails, `terraform validate` does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stdout || steps.validate.outputs.stdout }}
+    description: "The STDOUT stream of the call to `terraform validate`, or to `terraform init` when it failed. Empty when skipped."
+  stderr:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stderr || steps.validate.outputs.stderr }}
+    description: "The STDERR stream of the call to `terraform validate`, or to `terraform init` when it failed. Empty when skipped."
+  exitcode:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.exitcode || steps.validate.outputs.exitcode }}
+    description: "The exit code of the call to `terraform validate`, or to `terraform init` when it failed. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
 
 
 runs:
@@ -49,11 +59,25 @@ runs:
         export TF_WORKSPACE="$WORKSPACE"
       fi
 
+      # Capture the streams separately and defer the exit so the outputs are written even on failure.
+      out="$RUNNER_TEMP/terraform-validate-init.stdout"
+      err="$RUNNER_TEMP/terraform-validate-init.stderr"
+      exitcode=0
       terraform -chdir="$TARGET_DIR" init \
         -backend=false \
         -input=false \
-        -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-validate-init.log"
+        -no-color > "$out" 2> "$err" || exitcode=$?
+      cat "$out"
+      cat "$err" >&2
+      cat "$out" "$err" > "$RUNNER_TEMP/terraform-validate-init.log"
 
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
+        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
+        echo "exitcode=$exitcode"
+      } >> "$GITHUB_OUTPUT"
+      exit "$exitcode"
 
   - name: Add Failure Details to Job Summary
     id: init-summary
@@ -76,7 +100,22 @@ runs:
         export TF_WORKSPACE="$WORKSPACE"
       fi
 
-      terraform -chdir="$TARGET_DIR" validate -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-validate.log"
+      # Capture the streams separately and defer the exit so the outputs are written even on failure.
+      out="$RUNNER_TEMP/terraform-validate.stdout"
+      err="$RUNNER_TEMP/terraform-validate.stderr"
+      exitcode=0
+      terraform -chdir="$TARGET_DIR" validate -no-color > "$out" 2> "$err" || exitcode=$?
+      cat "$out"
+      cat "$err" >&2
+      cat "$out" "$err" > "$RUNNER_TEMP/terraform-validate.log"
+
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
+        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
+        echo "exitcode=$exitcode"
+      } >> "$GITHUB_OUTPUT"
+      exit "$exitcode"
 
   - name: Add Failure Details to Job Summary
     id: validate-summary

@@ -16,6 +16,15 @@ outputs:
   skipped:
     value: ${{ steps.fmt.outputs.skipped }}
     description: "`true` when `target_dir` holds no Terraform files and `terraform fmt` was not run. Empty otherwise."
+  stdout:
+    value: ${{ steps.fmt.outputs.stdout }}
+    description: "The STDOUT stream of the call to `terraform fmt`. Empty when skipped."
+  stderr:
+    value: ${{ steps.fmt.outputs.stderr }}
+    description: "The STDERR stream of the call to `terraform fmt`. Empty when skipped."
+  exitcode:
+    value: ${{ steps.fmt.outputs.exitcode }}
+    description: "The exit code of the call to `terraform fmt`. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
 
 
 runs:
@@ -46,7 +55,22 @@ runs:
         args+=(-recursive)
       fi
 
-      terraform -chdir="$target_dir" fmt "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/terraform-fmt.log"
+      # Capture the streams separately and defer the exit so the outputs are written even on failure.
+      out="$RUNNER_TEMP/terraform-fmt.stdout"
+      err="$RUNNER_TEMP/terraform-fmt.stderr"
+      exitcode=0
+      terraform -chdir="$target_dir" fmt "${args[@]}" > "$out" 2> "$err" || exitcode=$?
+      cat "$out"
+      cat "$err" >&2
+      cat "$out" "$err" > "$RUNNER_TEMP/terraform-fmt.log"
+
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
+        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
+        echo "exitcode=$exitcode"
+      } >> "$GITHUB_OUTPUT"
+      exit "$exitcode"
 
   - name: Add Failure Details to Job Summary
     id: fmt-summary
