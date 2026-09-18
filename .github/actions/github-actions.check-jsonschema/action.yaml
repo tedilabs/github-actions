@@ -16,29 +16,65 @@ inputs:
     default: "true"
     description: "(Optional) Whether to validate every `action.yml` and `action.yaml` found under `target_dir`, excluding `.git` and `node_modules`. Defaults to `true`."
 
+outputs:
+  # When the workflow validation fails, the action validation does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.validate-workflows.outcome == 'failure' && steps.validate-workflows.outputs.stdout || steps.validate-actions.outputs.stdout }}
+    description: "The STDOUT stream of the `check-jsonschema` call on the action files, or on the workflow files when that call failed. Empty when nothing was validated."
+  stderr:
+    value: ${{ steps.validate-workflows.outcome == 'failure' && steps.validate-workflows.outputs.stderr || steps.validate-actions.outputs.stderr }}
+    description: "The STDERR stream of the `check-jsonschema` call on the action files, or on the workflow files when that call failed. Empty when nothing was validated."
+  exitcode:
+    value: ${{ steps.validate-workflows.outcome == 'failure' && steps.validate-workflows.outputs.exitcode || steps.validate-actions.outputs.exitcode }}
+    description: "The exit code of the `check-jsonschema` call on the action files, or on the workflow files when that call failed. Empty when nothing was validated. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
 
 runs:
   using: composite
 
   steps:
-  - name: Validate Workflows
-    id: validate-workflows
-    if: inputs.validate_workflows == 'true'
+  - name: Resolve Targets
+    id: target
     shell: bash
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
+      VALIDATE_WORKFLOWS: ${{ inputs.validate_workflows }}
+      VALIDATE_ACTIONS: ${{ inputs.validate_actions }}
     run: |
       cd "$TARGET_DIR" || exit 1
-      files=$(find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
-      if [ -z "$files" ]; then
-        echo "No workflow files found. Skipping."
-        exit 0
+      check-jsonschema --version
+
+      # A file list stays empty when its validation is disabled or finds nothing, which skips the matching step.
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      if [ "$VALIDATE_WORKFLOWS" = "true" ]; then
+        files=$(find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
+        if [ -z "$files" ]; then
+          echo "No workflow files found. Skipping."
+        fi
+        printf 'workflow_files<<%s\n%s\n%s\n' "$delimiter" "$files" "$delimiter" >> "$GITHUB_OUTPUT"
+      fi
+      if [ "$VALIDATE_ACTIONS" = "true" ]; then
+        files=$(
+          find . -path ./.git -prune -o -path '*/node_modules' -prune -o \
+            -type f \( -name action.yml -o -name action.yaml \) -print | sort
+        )
+        if [ -z "$files" ]; then
+          echo "No action metadata files found. Skipping."
+        fi
+        printf 'action_files<<%s\n%s\n%s\n' "$delimiter" "$files" "$delimiter" >> "$GITHUB_OUTPUT"
       fi
 
-      check-jsonschema --version
-      echo "$files" | tr '\n' '\0' \
-        | xargs -0 check-jsonschema --builtin-schema vendor.github-workflows 2>&1 \
-        | tee "$RUNNER_TEMP/check-jsonschema-workflows.log"
+  - name: Validate Workflows
+    id: validate-workflows
+    if: steps.target.outputs.workflow_files != ''
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      FILES: ${{ steps.target.outputs.workflow_files }}
+    with:
+      working_directory: ${{ inputs.target_dir }}
+      run: |
+        printf '%s\n' "$FILES" | tr '\n' '\0' \
+          | xargs -0 check-jsonschema --builtin-schema vendor.github-workflows
 
   - name: Add Failure Details to Job Summary
     id: validate-workflows-summary
@@ -46,30 +82,20 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ check-jsonschema (workflows) · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/check-jsonschema-workflows.log
+      file: ${{ steps.validate-workflows.outputs.log_file }}
       lang: text
 
   - name: Validate Actions
     id: validate-actions
-    if: inputs.validate_actions == 'true'
-    shell: bash
+    if: steps.target.outputs.action_files != ''
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
-      TARGET_DIR: ${{ inputs.target_dir }}
-    run: |
-      cd "$TARGET_DIR" || exit 1
-      files=$(
-        find . -path ./.git -prune -o -path '*/node_modules' -prune -o \
-          -type f \( -name action.yml -o -name action.yaml \) -print | sort
-      )
-      if [ -z "$files" ]; then
-        echo "No action metadata files found. Skipping."
-        exit 0
-      fi
-
-      check-jsonschema --version
-      echo "$files" | tr '\n' '\0' \
-        | xargs -0 check-jsonschema --builtin-schema vendor.github-actions 2>&1 \
-        | tee "$RUNNER_TEMP/check-jsonschema-actions.log"
+      FILES: ${{ steps.target.outputs.action_files }}
+    with:
+      working_directory: ${{ inputs.target_dir }}
+      run: |
+        printf '%s\n' "$FILES" | tr '\n' '\0' \
+          | xargs -0 check-jsonschema --builtin-schema vendor.github-actions
 
   - name: Add Failure Details to Job Summary
     id: validate-actions-summary
@@ -77,5 +103,5 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ check-jsonschema (actions) · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/check-jsonschema-actions.log
+      file: ${{ steps.validate-actions.outputs.log_file }}
       lang: text
