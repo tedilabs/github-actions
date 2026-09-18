@@ -43,7 +43,7 @@ inputs:
 
 outputs:
   skipped:
-    value: ${{ steps.docs.outputs.skipped }}
+    value: ${{ steps.target.outputs.skipped }}
     description: "`true` when `target_dir` holds no Terraform files, or when `output_file` does not exist in non-recursive mode, and `terraform-docs` was not run. Empty otherwise."
   stdout:
     value: ${{ steps.docs.outputs.stdout }}
@@ -60,23 +60,18 @@ runs:
   using: composite
 
   steps:
-  - name: Run Terraform Docs
-    id: docs
+  - name: Resolve Options
+    id: target
     shell: bash
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
-      CHECK: ${{ inputs.check }}
       OUTPUT_FILE: ${{ inputs.output_file }}
-      FORMATTER: ${{ inputs.formatter }}
       CONFIG_FILE: ${{ inputs.config_file }}
       RECURSIVE: ${{ inputs.recursive }}
-      RECURSIVE_PATH: ${{ inputs.recursive_path }}
-      RECURSIVE_EXCLUDE: ${{ inputs.recursive_exclude }}
-      RECURSIVE_INCLUDE_MAIN: ${{ inputs.recursive_include_main }}
-      ARGS: ${{ inputs.args }}
     run: |
       target_dir="${TARGET_DIR%/}"
       target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
 
       # `terraform-docs` exits 0 on a directory without Terraform files, which would report a vacuous pass.
       depth_args=()
@@ -93,47 +88,53 @@ runs:
         exit 0
       fi
 
-      # The formatter is a positional subcommand, so it must come first.
-      read -ra formatter_args <<< "$FORMATTER"
-      read -ra extra_args <<< "$ARGS"
-
-      args=("${formatter_args[@]}" --output-file "$OUTPUT_FILE")
-      if [ "$CHECK" = "true" ]; then
-        args+=(--output-check)
-      fi
-      if [ "$RECURSIVE" = "true" ]; then
-        args+=(--recursive --recursive-path "$RECURSIVE_PATH" --recursive-include-main="$RECURSIVE_INCLUDE_MAIN")
-        if [ -n "$RECURSIVE_EXCLUDE" ]; then
-          args+=(--recursive-exclude "$RECURSIVE_EXCLUDE")
-        fi
-      fi
+      # `terraform-docs` runs inside the module, so make the config path absolute here.
       if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
-        args+=(--config "$(realpath "$CONFIG_FILE")")
+        echo "config=$(realpath "$CONFIG_FILE")" >> "$GITHUB_OUTPUT"
       elif [ -n "$CONFIG_FILE" ]; then
         echo "::warning::terraform-docs config file not found: $CONFIG_FILE. Falling back to config discovery from $target_dir."
       fi
-      args+=("${extra_args[@]}")
 
-      # Run inside the module so relative `output-file`, `recursive-path`, and config discovery resolve against it.
-      cd "$target_dir"
       terraform-docs --version
 
-      # Capture the streams separately and defer the exit so the outputs are written even on failure.
-      out="$RUNNER_TEMP/terraform-docs.stdout"
-      err="$RUNNER_TEMP/terraform-docs.stderr"
-      exitcode=0
-      terraform-docs "${args[@]}" . > "$out" 2> "$err" || exitcode=$?
-      cat "$out"
-      cat "$err" >&2
-      cat "$out" "$err" > "$RUNNER_TEMP/terraform-docs.log"
+  - name: Run Terraform Docs
+    id: docs
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      CHECK: ${{ inputs.check }}
+      OUTPUT_FILE: ${{ inputs.output_file }}
+      FORMATTER: ${{ inputs.formatter }}
+      CONFIG: ${{ steps.target.outputs.config }}
+      RECURSIVE: ${{ inputs.recursive }}
+      RECURSIVE_PATH: ${{ inputs.recursive_path }}
+      RECURSIVE_EXCLUDE: ${{ inputs.recursive_exclude }}
+      RECURSIVE_INCLUDE_MAIN: ${{ inputs.recursive_include_main }}
+      ARGS: ${{ inputs.args }}
+    with:
+      # Run inside the module so relative `output-file`, `recursive-path`, and config discovery resolve against it.
+      working_directory: ${{ steps.target.outputs.target_dir }}
+      run: |
+        # The formatter is a positional subcommand, so it must come first.
+        read -ra formatter_args <<< "$FORMATTER"
+        read -ra extra_args <<< "$ARGS"
 
-      delimiter="$(head -c 15 /dev/urandom | base64)"
-      {
-        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
-        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
-        echo "exitcode=$exitcode"
-      } >> "$GITHUB_OUTPUT"
-      exit "$exitcode"
+        args=("${formatter_args[@]}" --output-file "$OUTPUT_FILE")
+        if [ "$CHECK" = "true" ]; then
+          args+=(--output-check)
+        fi
+        if [ "$RECURSIVE" = "true" ]; then
+          args+=(--recursive --recursive-path "$RECURSIVE_PATH" --recursive-include-main="$RECURSIVE_INCLUDE_MAIN")
+          if [ -n "$RECURSIVE_EXCLUDE" ]; then
+            args+=(--recursive-exclude "$RECURSIVE_EXCLUDE")
+          fi
+        fi
+        if [ -n "$CONFIG" ]; then
+          args+=(--config "$CONFIG")
+        fi
+        args+=("${extra_args[@]}")
+
+        terraform-docs "${args[@]}" .
 
   - name: Add Failure Details to Job Summary
     id: docs-summary
@@ -141,5 +142,5 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform-docs · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/terraform-docs.log
+      file: ${{ steps.docs.outputs.log_file }}
       lang: text

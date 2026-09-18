@@ -50,34 +50,20 @@ runs:
   - name: Terraform Init
     id: init
     if: steps.target.outputs.skipped != 'true'
-    shell: bash
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
-    run: |
-      if [ -n "$WORKSPACE" ]; then
-        export TF_WORKSPACE="$WORKSPACE"
-      fi
+    with:
+      run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
 
-      # Capture the streams separately and defer the exit so the outputs are written even on failure.
-      out="$RUNNER_TEMP/terraform-validate-init.stdout"
-      err="$RUNNER_TEMP/terraform-validate-init.stderr"
-      exitcode=0
-      terraform -chdir="$TARGET_DIR" init \
-        -backend=false \
-        -input=false \
-        -no-color > "$out" 2> "$err" || exitcode=$?
-      cat "$out"
-      cat "$err" >&2
-      cat "$out" "$err" > "$RUNNER_TEMP/terraform-validate-init.log"
-
-      delimiter="$(head -c 15 /dev/urandom | base64)"
-      {
-        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
-        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
-        echo "exitcode=$exitcode"
-      } >> "$GITHUB_OUTPUT"
-      exit "$exitcode"
+        terraform -chdir="$TARGET_DIR" init \
+          -backend=false \
+          -input=false \
+          -no-color
 
   - name: Add Failure Details to Job Summary
     id: init-summary
@@ -85,37 +71,23 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
-      file: ${{ runner.temp }}/terraform-validate-init.log
+      file: ${{ steps.init.outputs.log_file }}
       lang: text
 
   - name: Terraform Validate
     id: validate
     if: steps.target.outputs.skipped != 'true'
-    shell: bash
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
-    run: |
-      if [ -n "$WORKSPACE" ]; then
-        export TF_WORKSPACE="$WORKSPACE"
-      fi
+    with:
+      run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
 
-      # Capture the streams separately and defer the exit so the outputs are written even on failure.
-      out="$RUNNER_TEMP/terraform-validate.stdout"
-      err="$RUNNER_TEMP/terraform-validate.stderr"
-      exitcode=0
-      terraform -chdir="$TARGET_DIR" validate -no-color > "$out" 2> "$err" || exitcode=$?
-      cat "$out"
-      cat "$err" >&2
-      cat "$out" "$err" > "$RUNNER_TEMP/terraform-validate.log"
-
-      delimiter="$(head -c 15 /dev/urandom | base64)"
-      {
-        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
-        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
-        echo "exitcode=$exitcode"
-      } >> "$GITHUB_OUTPUT"
-      exit "$exitcode"
+        terraform -chdir="$TARGET_DIR" validate -no-color
 
   - name: Add Failure Details to Job Summary
     id: validate-summary
@@ -123,5 +95,5 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform validate · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
-      file: ${{ runner.temp }}/terraform-validate.log
+      file: ${{ steps.validate.outputs.log_file }}
       lang: text
