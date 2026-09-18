@@ -36,6 +36,16 @@ outputs:
   skipped:
     value: ${{ steps.target.outputs.skipped }}
     description: "`true` when `target_dir` holds no Terraform files and `tflint` was not run. Empty otherwise."
+  # When `tflint --init` fails, `tflint` does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stdout || steps.tflint.outputs.stdout }}
+    description: "The STDOUT stream of the call to `tflint`, or to `tflint --init` when it failed. Empty when skipped."
+  stderr:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stderr || steps.tflint.outputs.stderr }}
+    description: "The STDERR stream of the call to `tflint`, or to `tflint --init` when it failed. Empty when skipped."
+  exitcode:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.exitcode || steps.tflint.outputs.exitcode }}
+    description: "The exit code of the call to `tflint`, or to `tflint --init` when it failed. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
 
 
 runs:
@@ -99,8 +109,23 @@ runs:
       fi
 
       tflint --version
-      tflint "${args[@]}" --init 2>&1 | tee "$RUNNER_TEMP/tflint-init.log"
 
+      # Capture the streams separately and defer the exit so the outputs are written even on failure.
+      out="$RUNNER_TEMP/tflint-init.stdout"
+      err="$RUNNER_TEMP/tflint-init.stderr"
+      exitcode=0
+      tflint "${args[@]}" --init > "$out" 2> "$err" || exitcode=$?
+      cat "$out"
+      cat "$err" >&2
+      cat "$out" "$err" > "$RUNNER_TEMP/tflint-init.log"
+
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
+        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
+        echo "exitcode=$exitcode"
+      } >> "$GITHUB_OUTPUT"
+      exit "$exitcode"
 
   - name: Add Failure Details to Job Summary
     id: init-summary
@@ -130,9 +155,24 @@ runs:
         args+=(--recursive)
       fi
 
+      # Capture the streams separately and defer the exit so the outputs are written even on failure.
+      out="$RUNNER_TEMP/tflint.stdout"
+      err="$RUNNER_TEMP/tflint.stderr"
+      exitcode=0
       tflint "${args[@]}" \
         --format "$FORMAT" \
-        --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY" 2>&1 | tee "$RUNNER_TEMP/tflint.log"
+        --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY" > "$out" 2> "$err" || exitcode=$?
+      cat "$out"
+      cat "$err" >&2
+      cat "$out" "$err" > "$RUNNER_TEMP/tflint.log"
+
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'stdout<<%s\n%s\n%s\n' "$delimiter" "$(cat "$out")" "$delimiter"
+        printf 'stderr<<%s\n%s\n%s\n' "$delimiter" "$(cat "$err")" "$delimiter"
+        echo "exitcode=$exitcode"
+      } >> "$GITHUB_OUTPUT"
+      exit "$exitcode"
 
   - name: Add Failure Details to Job Summary
     id: tflint-summary
