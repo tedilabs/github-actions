@@ -1,0 +1,76 @@
+name: Test - Lint Actions via shell.run
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          actionlint = "latest"
+          shellcheck = "latest"
+          "pipx:check-jsonschema" = "latest"
+
+    - name: Lint (actionlint)
+      id: actionlint
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/lint-actions-shell-run
+
+    - name: Validate (check-jsonschema)
+      id: check-jsonschema
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/lint-actions-shell-run
+
+    - name: Validate (check-jsonschema, workflows disabled)
+      id: check-jsonschema-actions-only
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/lint-actions-shell-run
+      with:
+        validate_workflows: "false"
+
+    - name: Assert
+      id: assert
+      env:
+        AL_OUTCOME: ${{ steps.actionlint.outcome }}
+        AL_EXITCODE: ${{ steps.actionlint.outputs.exitcode }}
+        AL_STDOUT: ${{ steps.actionlint.outputs.stdout }}
+        AL_STDERR: ${{ steps.actionlint.outputs.stderr }}
+        CJ_OUTCOME: ${{ steps.check-jsonschema.outcome }}
+        CJ_EXITCODE: ${{ steps.check-jsonschema.outputs.exitcode }}
+        CJ_STDOUT: ${{ steps.check-jsonschema.outputs.stdout }}
+        CJ_STDERR: ${{ steps.check-jsonschema.outputs.stderr }}
+        CJ2_OUTCOME: ${{ steps.check-jsonschema-actions-only.outcome }}
+        CJ2_EXITCODE: ${{ steps.check-jsonschema-actions-only.outputs.exitcode }}
+        CJ2_STDOUT: ${{ steps.check-jsonschema-actions-only.outputs.stdout }}
+      run: |
+        for v in AL_OUTCOME AL_EXITCODE AL_STDOUT AL_STDERR CJ_OUTCOME CJ_EXITCODE CJ_STDOUT CJ_STDERR CJ2_OUTCOME CJ2_EXITCODE CJ2_STDOUT; do
+          printf '%s=<%s>\n' "$v" "${!v}"
+        done
+
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$AL_OUTCOME" "success" "actionlint succeeds on this repo"
+        check "$AL_EXITCODE" "0" "actionlint exitcode is 0"
+        check "$AL_STDOUT$AL_STDERR" "" "actionlint prints nothing on success"
+        check "$CJ_OUTCOME" "success" "check-jsonschema succeeds on this repo"
+        check "$CJ_EXITCODE" "0" "check-jsonschema exitcode is 0"
+        check "$CJ_STDOUT" "ok -- validation done" "check-jsonschema stdout comes from the action-files call"
+        check "$CJ2_OUTCOME" "success" "check-jsonschema with workflows disabled succeeds"
+        check "$CJ2_EXITCODE" "0" "check-jsonschema with workflows disabled still reports exitcode from the action-files call"
+        exit "$failed"
