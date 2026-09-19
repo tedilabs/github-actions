@@ -1,0 +1,65 @@
+name: Test - composite summary always
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          "pipx:check-jsonschema" = "latest"
+          terraform = "latest"
+
+    - name: Prepare Fixtures
+      id: fixtures
+      run: |
+        mkdir -p "$RUNNER_TEMP/broken/wf" "$RUNNER_TEMP/broken/tf"
+        printf 'name: bad\non: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps: not-a-list\n' > "$RUNNER_TEMP/broken/wf/bad.yaml"
+        printf 'resource "null_resource" "x" {\n    triggers = { a = "b" }\n}\n' > "$RUNNER_TEMP/broken/tf/main.tf"
+
+    - name: check-jsonschema on a broken file
+      id: cj
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@fix/composite-summary-always
+      with:
+        schema_type: workflows
+        target_dir: ${{ runner.temp }}/broken/wf
+
+    - name: terraform fmt on an unformatted file
+      id: fmt
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.fmt@fix/composite-summary-always
+      with:
+        target_dir: ${{ runner.temp }}/broken/tf
+
+    - name: Assert
+      id: assert
+      env:
+        CJ_OUTCOME: ${{ steps.cj.outcome }}
+        FMT_OUTCOME: ${{ steps.fmt.outcome }}
+      run: |
+        echo "--- job summary so far ---"; cat "$GITHUB_STEP_SUMMARY"; echo "--- end ---"
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$CJ_OUTCOME" "failure" "check-jsonschema failed as expected"
+        check "$FMT_OUTCOME" "failure" "terraform fmt failed as expected"
+        if grep -q "❌ check-jsonschema (workflows)" "$GITHUB_STEP_SUMMARY"; then echo "PASS check-jsonschema failure details reached the job summary"; else echo "FAIL check-jsonschema summary missing"; failed=1; fi
+        if grep -q "❌ terraform fmt" "$GITHUB_STEP_SUMMARY"; then echo "PASS terraform fmt failure details reached the job summary"; else echo "FAIL terraform fmt summary missing"; failed=1; fi
+        if grep -q "bad.yaml" "$GITHUB_STEP_SUMMARY" && grep -q "triggers" "$GITHUB_STEP_SUMMARY"; then echo "PASS both summaries carry the tool output"; else echo "FAIL tool output missing from the summaries"; failed=1; fi
+        exit "$failed"
