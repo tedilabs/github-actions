@@ -115,7 +115,7 @@ jobs:
         # A check that ran but found no files reports `skipped`.
         results: |
           {
-            "actionlint": "${{ steps.actionlint.outcome }}",
+            "actionlint": "${{ steps.actionlint.outputs.skipped == 'true' && 'skipped' || steps.actionlint.outcome }}",
             "check-jsonschema (workflows)": "${{ steps.check-jsonschema-workflows.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-workflows.outcome }}",
             "check-jsonschema (actions)": "${{ steps.check-jsonschema-actions.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-actions.outcome }}"
           }
