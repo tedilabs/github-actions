@@ -1,0 +1,105 @@
+name: Ansible - ansible-lint
+description: Lint Ansible playbooks and roles with `ansible-lint`. On failure, the findings are added to the job summary. Requires the `ansible-lint` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Ansible project directory to lint, where `.ansible-lint` and `ansible.cfg` live. Defaults to `./`."
+  requirements_file:
+    required: false
+    description: "(Optional) The path to a Galaxy requirements file, relative to the repository root (e.g. `ansible/requirements.yaml`). When set, its collections are installed outside the checkout and exposed to `ansible-lint` through `ANSIBLE_COLLECTIONS_PATH`, so they are resolvable but never linted. When omitted, `ansible-lint` installs a `requirements.yml` found in the project directory on its own."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` holds no YAML files and `ansible-lint` was not run. Empty otherwise."
+  # When the collection install fails, `ansible-lint` does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.install-collections.outcome == 'failure' && steps.install-collections.outputs.stdout || steps.ansible-lint.outputs.stdout }}
+    description: "The STDOUT stream of the call to `ansible-lint`, or to `ansible-galaxy collection install` when it failed. Empty when skipped."
+  stderr:
+    value: ${{ steps.install-collections.outcome == 'failure' && steps.install-collections.outputs.stderr || steps.ansible-lint.outputs.stderr }}
+    description: "The STDERR stream of the call to `ansible-lint`, or to `ansible-galaxy collection install` when it failed. Empty when skipped."
+  exitcode:
+    value: ${{ steps.install-collections.outcome == 'failure' && steps.install-collections.outputs.exitcode || steps.ansible-lint.outputs.exitcode }}
+    description: "The exit code of the call to `ansible-lint`, or to `ansible-galaxy collection install` when it failed. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      REQUIREMENTS_FILE: ${{ inputs.requirements_file }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      # `ansible-lint` exits 0 on a directory without YAML files, which would report a vacuous pass.
+      if [ -z "$(find "$target_dir" -path '*/.git' -prune -o -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)" ]; then
+        echo "::notice::Skipping ansible-lint: no YAML files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
+      # Collections go outside the checkout, so they resolve for linting but are never linted themselves.
+      if [ -n "$REQUIREMENTS_FILE" ]; then
+        echo "collections_path=$RUNNER_TEMP/ansible/collections" >> "$GITHUB_OUTPUT"
+      fi
+
+      ansible-lint --version
+
+  - name: Install Galaxy Collections
+    id: install-collections
+    if: steps.target.outputs.skipped != 'true' && inputs.requirements_file != ''
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      REQUIREMENTS_FILE: ${{ inputs.requirements_file }}
+      COLLECTIONS_PATH: ${{ steps.target.outputs.collections_path }}
+    with:
+      run: |
+        # Restrict the search path so collections already present elsewhere on the runner are not skipped.
+        ANSIBLE_COLLECTIONS_PATH="$COLLECTIONS_PATH" \
+          ansible-galaxy collection install -r "$REQUIREMENTS_FILE" -p "$COLLECTIONS_PATH"
+
+  - name: Add Failure Details to Job Summary
+    id: install-collections-summary
+    if: always() && steps.install-collections.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ ansible-galaxy collection install · ${{ inputs.requirements_file }}"
+      file: ${{ steps.install-collections.outputs.log_file }}
+      lang: text
+
+  - name: Run ansible-lint
+    id: ansible-lint
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      COLLECTIONS_PATH: ${{ steps.target.outputs.collections_path }}
+    with:
+      # Run inside the project so `.ansible-lint`, `ansible.cfg`, and relative `roles_path` resolve against it.
+      working_directory: ${{ steps.target.outputs.target_dir }}
+      run: |
+        if [ -n "$COLLECTIONS_PATH" ]; then
+          export ANSIBLE_COLLECTIONS_PATH="$COLLECTIONS_PATH"
+        fi
+
+        # Under GitHub Actions, `ansible-lint` emits workflow annotations on its own.
+        ansible-lint --nocolor
+
+  - name: Add Failure Details to Job Summary
+    id: ansible-lint-summary
+    if: always() && steps.ansible-lint.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ ansible-lint · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.ansible-lint.outputs.log_file }}
+      lang: text

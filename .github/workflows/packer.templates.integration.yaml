@@ -1,0 +1,174 @@
+name: Packer Templates - Integration
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      paths:
+        type: string
+        required: false
+        default: |
+          builds/**
+        description: "(Optional) File and directory patterns used to detect changed Packer template directories, one per line. Defaults to `builds/**`."
+      paths_max_depth:
+        type: string
+        required: false
+        default: "2"
+        description: "(Optional) The maximum depth of the changed directories to check. For example, `builds/foo/source.pkr.hcl` with a max depth of `2` is checked as `builds/foo`. Defaults to `2`."
+
+      packer_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `packer` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
+      aws_region:
+        type: string
+        required: false
+        default: us-east-1
+        description: "(Optional) The region exported as `AWS_DEFAULT_REGION` so that Amazon builders without an explicit `region` pass `packer validate` on a runner with no AWS configuration. No credentials are needed. Defaults to `us-east-1`."
+
+      fmt_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to check formatting with `packer fmt`. Defaults to `true`."
+      validate_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to run `packer init` and `packer validate`. Defaults to `true`."
+
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the integration report as a single sticky comment on pull requests. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
+
+
+jobs:
+  changed:
+    name: Detect Changed Directories
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    outputs:
+      has_directories: ${{ steps.changed-dirs.outputs.has_directories }}
+      directories: ${{ steps.changed-dirs.outputs.directories }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: changed-dirs
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      with:
+        paths: ${{ inputs.paths }}
+        max_depth: ${{ inputs.paths_max_depth }}
+
+
+  lint:
+    name: Lint (${{ matrix.path }})
+    needs:
+    - changed
+    if: needs.changed.outputs.has_directories == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ${{ fromJson(needs.changed.outputs.directories) }}
+
+    env:
+      AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
+    # still take precedence while a self-hosted runner's real global config is left untouched.
+    - name: Set Default Tool Versions
+      id: default-tools
+      env:
+        PACKER_VERSION: ${{ inputs.packer_version }}
+      run: |
+        config_file="$RUNNER_TEMP/mise-defaults.toml"
+        cat > "$config_file" <<TOML
+        [tools]
+        packer = "$PACKER_VERSION"
+        TOML
+
+        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+
+    - name: Check Format
+      id: fmt
+      if: inputs.fmt_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.fmt@main
+      with:
+        target_dir: ${{ matrix.path }}
+
+    - name: Validate
+      id: validate
+      if: inputs.validate_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.validate@main
+      with:
+        target_dir: ${{ matrix.path }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ matrix.path }}
+        id_label: Directory
+        artifact_prefix: packer-integration
+        job_status: ${{ job.status }}
+        # An empty value keeps a check that is turned off out of the report; a check that ran but had
+        # nothing to do reports `skipped`.
+        results: |
+          {
+            "fmt": "${{ inputs.fmt_enabled && (steps.fmt.outputs.skipped == 'true' && 'skipped' || steps.fmt.outcome) || '' }}",
+            "validate": "${{ inputs.validate_enabled && (steps.validate.outputs.skipped == 'true' && 'skipped' || steps.validate.outcome) || '' }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - changed
+    - lint
+    if: always() && needs.changed.outputs.has_directories == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Directory
+        artifact_prefix: packer-integration
+        title: Packer Integration
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: packer-integration
