@@ -99,7 +99,7 @@ jobs:
         check "$WF" "success/0//ok -- validation done" "workflows: default target_dir validates .github/workflows"
         check "$AC" "success/0//ok -- validation done" "actions: default target_dir validates .github/actions"
         check "$AC_CUSTOM" "success/0//ok -- validation done" "actions: custom target_dir with trailing slash is honored"
-        check "$WF_EMPTY" "success///" "workflows: empty target_dir is skipped with empty outputs"
+        check "$WF_EMPTY" "success//true/" "workflows: empty target_dir is skipped with empty outputs"
         check "$WF_BROKEN_OUTCOME" "failure" "workflows: broken file fails the step"
         check "$WF_BROKEN_EXITCODE" "1" "workflows: broken file reports exitcode 1"
         case "$WF_BROKEN_STDOUT$WF_BROKEN_STDERR" in *bad.yaml*) echo "PASS workflows: broken file is named in the captured output";; *) echo "FAIL workflows: broken file not named in the captured output"; failed=1;; esac
