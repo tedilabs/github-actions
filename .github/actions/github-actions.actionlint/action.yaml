@@ -9,7 +9,7 @@ inputs:
     description: "(Optional) The directory holding the workflow files to lint. Only the `*.yml` and `*.yaml` files directly in it are linted, since GitHub only reads top-level workflow files. Defaults to `.github/workflows`."
   config_file:
     required: false
-    description: "(Optional) The path to the `actionlint` config file, relative to the repository root. When omitted, `actionlint` discovers `.github/actionlint.yaml` from the project that holds the workflow files as usual."
+    description: "(Optional) The path to the `actionlint` config file, relative to the repository root. When omitted, `actionlint` discovers `.github/actionlint.yaml` in the Git repository that holds the workflow files as usual; files outside a Git repository are linted without a config."
   shellcheck_enabled:
     required: false
     default: "true"
@@ -80,7 +80,7 @@ runs:
           args+=(-shellcheck=)
         fi
 
-        # The files are passed explicitly; `actionlint` still discovers the config from the project that holds them.
+        # The files are passed explicitly; `actionlint` still discovers the config from the Git repository that holds them.
         readarray -t files <<< "$FILES"
         actionlint "${args[@]}" "${files[@]}"
 
