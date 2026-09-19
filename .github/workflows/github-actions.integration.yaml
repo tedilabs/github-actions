@@ -86,11 +86,21 @@ jobs:
         config_file: ${{ inputs.actionlint_config_file }}
         shellcheck_enabled: ${{ inputs.actionlint_shellcheck_enabled }}
 
-    - name: Validate (check-jsonschema)
-      id: check-jsonschema
+    - name: Validate Workflows (check-jsonschema)
+      id: check-jsonschema-workflows
       if: inputs.check_jsonschema_enabled
       continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@main
+      with:
+        schema_type: workflows
+
+    - name: Validate Actions (check-jsonschema)
+      id: check-jsonschema-actions
+      if: inputs.check_jsonschema_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@main
+      with:
+        schema_type: actions
 
     - name: Collect Results
       id: results
@@ -102,10 +112,12 @@ jobs:
         id_label: Repository
         artifact_prefix: github-actions-integration
         job_status: ${{ job.status }}
+        # A check that ran but found no files reports `skipped`.
         results: |
           {
             "actionlint": "${{ steps.actionlint.outcome }}",
-            "check-jsonschema": "${{ steps.check-jsonschema.outcome }}"
+            "check-jsonschema (workflows)": "${{ steps.check-jsonschema-workflows.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-workflows.outcome }}",
+            "check-jsonschema (actions)": "${{ steps.check-jsonschema-actions.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-actions.outcome }}"
           }
 
 
