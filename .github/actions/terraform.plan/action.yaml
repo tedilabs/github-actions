@@ -54,16 +54,17 @@ runs:
   steps:
   - name: Terraform Init
     id: init
-    shell: bash
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
-    run: |
-      if [ -n "$WORKSPACE" ]; then
-        export TF_WORKSPACE="$WORKSPACE"
-      fi
+    with:
+      run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
 
-      terraform -chdir="$TARGET_DIR" init -input=false -no-color 2>&1 | tee "$RUNNER_TEMP/terraform-plan-init.log"
+        terraform -chdir="$TARGET_DIR" init -input=false -no-color
 
   - name: Add Failure Details to Job Summary
     id: init-summary
@@ -71,7 +72,7 @@ runs:
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
-      file: ${{ runner.temp }}/terraform-plan-init.log
+      file: ${{ steps.init.outputs.log_file }}
       lang: text
 
   - name: Terraform Plan
@@ -196,6 +197,7 @@ runs:
     shell: bash
     env:
       MAX_LOG_LINES: "30"
+      INIT_LOG: ${{ steps.init.outputs.log_file }}
     run: |
       excerpt() {
         printf '```text\n%s\n```\n' "$(tail -n "$MAX_LOG_LINES" "$1")"
@@ -205,8 +207,8 @@ runs:
         summary="$(cat "$RUNNER_TEMP/terraform-plan-summary.md")"
       elif [ -s "$RUNNER_TEMP/terraform-plan.log" ]; then
         summary="> [!CAUTION]"$'\n'"> \`terraform plan\` failed."$'\n\n'"$(excerpt "$RUNNER_TEMP/terraform-plan.log")"
-      elif [ -s "$RUNNER_TEMP/terraform-plan-init.log" ]; then
-        summary="> [!CAUTION]"$'\n'"> \`terraform init\` failed, so nothing was planned."$'\n\n'"$(excerpt "$RUNNER_TEMP/terraform-plan-init.log")"
+      elif [ -n "$INIT_LOG" ] && [ -s "$INIT_LOG" ]; then
+        summary="> [!CAUTION]"$'\n'"> \`terraform init\` failed, so nothing was planned."$'\n\n'"$(excerpt "$INIT_LOG")"
       else
         summary="> [!CAUTION]"$'\n'"> The plan did not run. See the job log."
       fi
