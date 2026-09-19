@@ -1,0 +1,107 @@
+name: Test - check-jsonschema schema_type
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          "pipx:check-jsonschema" = "latest"
+
+    - name: Prepare Fixtures
+      id: fixtures
+      run: |
+        mkdir -p "$RUNNER_TEMP/empty" "$RUNNER_TEMP/broken/wf"
+        printf 'on: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n    - run: echo hi\n' > "$RUNNER_TEMP/broken/wf/ok.yaml"
+        printf 'name: bad\non: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps: not-a-list\n' > "$RUNNER_TEMP/broken/wf/bad.yaml"
+
+    - name: Workflows (default target_dir)
+      id: wf
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-jsonschema-schema-type
+      with:
+        schema_type: workflows
+
+    - name: Actions (default target_dir)
+      id: ac
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-jsonschema-schema-type
+      with:
+        schema_type: actions
+
+    - name: Actions (custom target_dir)
+      id: ac-custom
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-jsonschema-schema-type
+      with:
+        schema_type: actions
+        target_dir: .github/actions/shell.run/
+
+    - name: Workflows (empty target_dir)
+      id: wf-empty
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-jsonschema-schema-type
+      with:
+        schema_type: workflows
+        target_dir: ${{ runner.temp }}/empty
+
+    - name: Workflows (broken file)
+      id: wf-broken
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-jsonschema-schema-type
+      with:
+        schema_type: workflows
+        target_dir: ${{ runner.temp }}/broken/wf
+
+    - name: Invalid schema_type
+      id: invalid
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-jsonschema-schema-type
+      with:
+        schema_type: bogus
+
+    - name: Assert
+      id: assert
+      env:
+        WF: ${{ steps.wf.outcome }}/${{ steps.wf.outputs.exitcode }}/${{ steps.wf.outputs.skipped }}/${{ steps.wf.outputs.stdout }}
+        AC: ${{ steps.ac.outcome }}/${{ steps.ac.outputs.exitcode }}/${{ steps.ac.outputs.skipped }}/${{ steps.ac.outputs.stdout }}
+        AC_CUSTOM: ${{ steps.ac-custom.outcome }}/${{ steps.ac-custom.outputs.exitcode }}/${{ steps.ac-custom.outputs.skipped }}/${{ steps.ac-custom.outputs.stdout }}
+        WF_EMPTY: ${{ steps.wf-empty.outcome }}/${{ steps.wf-empty.outputs.exitcode }}/${{ steps.wf-empty.outputs.skipped }}/${{ steps.wf-empty.outputs.stdout }}
+        WF_BROKEN_OUTCOME: ${{ steps.wf-broken.outcome }}
+        WF_BROKEN_EXITCODE: ${{ steps.wf-broken.outputs.exitcode }}
+        WF_BROKEN_STDOUT: ${{ steps.wf-broken.outputs.stdout }}
+        WF_BROKEN_STDERR: ${{ steps.wf-broken.outputs.stderr }}
+        INVALID: ${{ steps.invalid.outcome }}/${{ steps.invalid.outputs.exitcode }}/${{ steps.invalid.outputs.skipped }}
+      run: |
+        for v in WF AC AC_CUSTOM WF_EMPTY WF_BROKEN_OUTCOME WF_BROKEN_EXITCODE WF_BROKEN_STDOUT WF_BROKEN_STDERR INVALID; do
+          printf '%s=<%s>\n' "$v" "${!v}"
+        done
+
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$WF" "success/0//ok -- validation done" "workflows: default target_dir validates .github/workflows"
+        check "$AC" "success/0//ok -- validation done" "actions: default target_dir validates .github/actions"
+        check "$AC_CUSTOM" "success/0//ok -- validation done" "actions: custom target_dir with trailing slash is honored"
+        check "$WF_EMPTY" "success///" "workflows: empty target_dir is skipped with empty outputs"
+        check "$WF_BROKEN_OUTCOME" "failure" "workflows: broken file fails the step"
+        check "$WF_BROKEN_EXITCODE" "1" "workflows: broken file reports exitcode 1"
+        case "$WF_BROKEN_STDOUT$WF_BROKEN_STDERR" in *bad.yaml*) echo "PASS workflows: broken file is named in the captured output";; *) echo "FAIL workflows: broken file not named in the captured output"; failed=1;; esac
+        check "$INVALID" "failure//" "invalid schema_type fails before running, with empty outputs"
+        exit "$failed"
