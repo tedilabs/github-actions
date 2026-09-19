@@ -68,7 +68,7 @@ runs:
 
   - name: Add Failure Details to Job Summary
     id: fmt-summary
-    if: steps.fmt.outcome == 'failure'
+    if: always() && steps.fmt.outcome == 'failure'
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ terraform fmt · ${{ inputs.target_dir }}"
