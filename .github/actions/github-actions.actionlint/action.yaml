@@ -86,7 +86,7 @@ runs:
 
   - name: Add Failure Details to Job Summary
     id: actionlint-summary
-    if: steps.actionlint.outcome == 'failure'
+    if: always() && steps.actionlint.outcome == 'failure'
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
       title: "❌ actionlint · ${{ steps.target.outputs.target_dir }}"
