@@ -12,43 +12,80 @@ inputs:
     default: ${{ github.token }}
     description: "(Optional) The GitHub token used by `packer init` to download plugins from GitHub without hitting the anonymous rate limit, exported as `PACKER_GITHUB_API_TOKEN`. Defaults to the automatically generated `github.token`."
 
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` holds no Packer template files and neither `packer init` nor `packer validate` was run. Empty otherwise."
+  # When `packer init` fails, `packer validate` does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stdout || steps.validate.outputs.stdout }}
+    description: "The STDOUT stream of the call to `packer validate`, or to `packer init` when it failed. Empty when skipped."
+  stderr:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stderr || steps.validate.outputs.stderr }}
+    description: "The STDERR stream of the call to `packer validate`, or to `packer init` when it failed. Empty when skipped."
+  exitcode:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.exitcode || steps.validate.outputs.exitcode }}
+    description: "The exit code of the call to `packer validate`, or to `packer init` when it failed. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
 
 runs:
   using: composite
 
   steps:
-  - name: Packer Init
-    id: init
+  - name: Resolve Target
+    id: target
     shell: bash
     env:
-      PACKER_GITHUB_API_TOKEN: ${{ inputs.github_token }}
       TARGET_DIR: ${{ inputs.target_dir }}
     run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      # `packer validate` fails on a directory without templates, which would report a failure for an empty target.
+      if [ -z "$(find "$target_dir" -maxdepth 1 -type f \( -name '*.pkr.hcl' -o -name '*.pkr.json' \) -print -quit)" ]; then
+        echo "::notice::Skipping packer validate: no Packer template files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
       packer version
-      packer init "$TARGET_DIR" 2>&1 | tee "$RUNNER_TEMP/packer-validate-init.log"
+
+  - name: Packer Init
+    id: init
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      PACKER_GITHUB_API_TOKEN: ${{ inputs.github_token }}
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+    with:
+      run: |
+        packer init "$TARGET_DIR"
 
   - name: Add Failure Details to Job Summary
     id: init-summary
-    if: steps.init.outcome == 'failure'
+    if: always() && steps.init.outcome == 'failure'
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
-      title: "❌ packer init · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/packer-validate-init.log
+      title: "❌ packer init · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.init.outputs.log_file }}
       lang: text
 
   - name: Packer Validate
     id: validate
-    shell: bash
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
-      TARGET_DIR: ${{ inputs.target_dir }}
-    run: |
-      packer validate "$TARGET_DIR" 2>&1 | tee "$RUNNER_TEMP/packer-validate.log"
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+    with:
+      run: |
+        packer validate "$TARGET_DIR"
 
   - name: Add Failure Details to Job Summary
     id: validate-summary
-    if: steps.validate.outcome == 'failure'
+    if: always() && steps.validate.outcome == 'failure'
     uses: tedilabs/github-actions/.github/actions/github.step-summary@main
     with:
-      title: "❌ packer validate · ${{ inputs.target_dir }}"
-      file: ${{ runner.temp }}/packer-validate.log
+      title: "❌ packer validate · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.validate.outputs.log_file }}
       lang: text
