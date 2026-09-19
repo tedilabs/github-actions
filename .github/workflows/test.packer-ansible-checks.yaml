@@ -1,0 +1,139 @@
+name: Test - Packer and Ansible checks
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          packer = "latest"
+          python = "3.12"
+
+    - name: Install ansible-lint
+      id: install-ansible-lint
+      run: python -m pip install --quiet ansible-lint
+
+    - name: Prepare Fixtures
+      id: fixtures
+      run: |
+        mkdir -p "$RUNNER_TEMP/pk/ok" "$RUNNER_TEMP/pk/bad" "$RUNNER_TEMP/pk/empty" "$RUNNER_TEMP/an/ok" "$RUNNER_TEMP/an/bad" "$RUNNER_TEMP/an/empty"
+        cat > "$RUNNER_TEMP/pk/ok/build.pkr.hcl" <<'HCL'
+        source "null" "example" {
+          communicator = "none"
+        }
+
+        build {
+          sources = ["source.null.example"]
+        }
+        HCL
+        printf 'source "null" "example" {\n    communicator   = "none"\n}\n\nbuild {\n  sources = ["source.null.example"]\n}\n' > "$RUNNER_TEMP/pk/bad/build.pkr.hcl"
+        printf -- '---\n- name: Example\n  hosts: localhost\n  gather_facts: false\n  tasks:\n    - name: Say hello\n      ansible.builtin.debug:\n        msg: hello\n' > "$RUNNER_TEMP/an/ok/playbook.yml"
+        printf -- '---\n- hosts: localhost\n  tasks:\n    - debug: msg=hello\n' > "$RUNNER_TEMP/an/bad/playbook.yml"
+
+    - name: packer fmt (formatted)
+      id: fmt-ok
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.fmt@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/pk/ok/
+
+    - name: packer fmt (unformatted)
+      id: fmt-bad
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.fmt@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/pk/bad
+
+    - name: packer fmt (empty)
+      id: fmt-empty
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.fmt@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/pk/empty
+
+    - name: packer validate (ok)
+      id: validate-ok
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.validate@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/pk/ok
+
+    - name: packer validate (empty)
+      id: validate-empty
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.validate@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/pk/empty
+
+    - name: ansible-lint (ok)
+      id: lint-ok
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/an/ok/
+
+    - name: ansible-lint (bad)
+      id: lint-bad
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/an/bad
+
+    - name: ansible-lint (empty)
+      id: lint-empty
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@feat/packer-workflows
+      with:
+        target_dir: ${{ runner.temp }}/an/empty
+
+    - name: Assert
+      id: assert
+      env:
+        FMT_OK: ${{ steps.fmt-ok.outcome }}/${{ steps.fmt-ok.outputs.exitcode }}/${{ steps.fmt-ok.outputs.skipped }}
+        FMT_BAD: ${{ steps.fmt-bad.outcome }}/${{ steps.fmt-bad.outputs.exitcode }}/${{ steps.fmt-bad.outputs.skipped }}
+        FMT_BAD_STDOUT: ${{ steps.fmt-bad.outputs.stdout }}
+        FMT_EMPTY: ${{ steps.fmt-empty.outcome }}/${{ steps.fmt-empty.outputs.exitcode }}/${{ steps.fmt-empty.outputs.skipped }}
+        VALIDATE_OK: ${{ steps.validate-ok.outcome }}/${{ steps.validate-ok.outputs.exitcode }}/${{ steps.validate-ok.outputs.skipped }}
+        VALIDATE_OK_STDOUT: ${{ steps.validate-ok.outputs.stdout }}
+        VALIDATE_EMPTY: ${{ steps.validate-empty.outcome }}/${{ steps.validate-empty.outputs.exitcode }}/${{ steps.validate-empty.outputs.skipped }}
+        LINT_OK: ${{ steps.lint-ok.outcome }}/${{ steps.lint-ok.outputs.exitcode }}/${{ steps.lint-ok.outputs.skipped }}
+        LINT_BAD: ${{ steps.lint-bad.outcome }}/${{ steps.lint-bad.outputs.exitcode }}/${{ steps.lint-bad.outputs.skipped }}
+        LINT_BAD_OUTPUT: ${{ steps.lint-bad.outputs.stdout }}${{ steps.lint-bad.outputs.stderr }}
+        LINT_EMPTY: ${{ steps.lint-empty.outcome }}/${{ steps.lint-empty.outputs.exitcode }}/${{ steps.lint-empty.outputs.skipped }}
+      run: |
+        for v in FMT_OK FMT_BAD FMT_EMPTY VALIDATE_OK VALIDATE_EMPTY LINT_OK LINT_BAD LINT_EMPTY; do
+          printf '%s=<%s>\n' "$v" "${!v}"
+        done
+        printf 'FMT_BAD_STDOUT=<%s>\nVALIDATE_OK_STDOUT=<%s>\nLINT_BAD_OUTPUT=<%s>\n' "$FMT_BAD_STDOUT" "$VALIDATE_OK_STDOUT" "$(printf '%s' "$LINT_BAD_OUTPUT" | head -c 400)"
+
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$FMT_OK" "success/0/" "packer fmt passes on a formatted template (trailing slash honored)"
+        check "$FMT_BAD" "failure/3/" "packer fmt fails with exit 3 on an unformatted template"
+        case "$FMT_BAD_STDOUT" in *communicator*) echo "PASS packer fmt diff is in stdout";; *) echo "FAIL packer fmt diff missing from stdout"; failed=1;; esac
+        check "$FMT_EMPTY" "success//true" "packer fmt skips an empty directory"
+        check "$VALIDATE_OK" "success/0/" "packer init and validate pass on a null-builder template"
+        case "$VALIDATE_OK_STDOUT" in *"configuration is valid"*) echo "PASS packer validate stdout is captured";; *) echo "FAIL packer validate stdout missing"; failed=1;; esac
+        check "$VALIDATE_EMPTY" "success//true" "packer validate skips an empty directory"
+        check "$LINT_OK" "success/0/" "ansible-lint passes on a clean playbook (trailing slash honored)"
+        check "$LINT_BAD" "failure/2/" "ansible-lint fails with exit 2 on a playbook with findings"
+        case "$LINT_BAD_OUTPUT" in *name*) echo "PASS ansible-lint findings are in the captured output";; *) echo "FAIL ansible-lint findings missing"; failed=1;; esac
+        check "$LINT_EMPTY" "success//true" "ansible-lint skips a directory without YAML files"
+        exit "$failed"
