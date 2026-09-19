@@ -30,6 +30,8 @@ jobs:
       id: fixtures
       run: |
         mkdir -p "$RUNNER_TEMP/empty" "$RUNNER_TEMP/proj/.github/workflows" "$RUNNER_TEMP/noconf/.github/workflows"
+        # actionlint locates the project root, and therefore the config, by the .git directory.
+        git init -q "$RUNNER_TEMP/proj"
         wf='on: push
         jobs:
           x:
