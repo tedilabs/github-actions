@@ -1,0 +1,92 @@
+name: Test - actionlint skipped
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          actionlint = "latest"
+          shellcheck = "latest"
+
+    - name: Prepare Fixtures
+      id: fixtures
+      run: |
+        mkdir -p "$RUNNER_TEMP/empty" "$RUNNER_TEMP/proj/.github/workflows" "$RUNNER_TEMP/noconf/.github/workflows"
+        wf='on: push
+        jobs:
+          x:
+            runs-on: my-custom-runner
+            steps:
+            - run: echo hi
+        '
+        printf '%s\n' "$wf" > "$RUNNER_TEMP/proj/.github/workflows/wf.yaml"
+        printf '%s\n' "$wf" > "$RUNNER_TEMP/noconf/.github/workflows/wf.yaml"
+        printf 'self-hosted-runner:\n  labels:\n  - my-custom-runner\n' > "$RUNNER_TEMP/proj/.github/actionlint.yaml"
+
+    - name: Default target_dir
+      id: default
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/actionlint-skipped
+
+    - name: Custom target_dir with config discovered
+      id: conf
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/actionlint-skipped
+      with:
+        target_dir: ${{ runner.temp }}/proj/.github/workflows/
+
+    - name: Custom target_dir without config
+      id: noconf
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/actionlint-skipped
+      with:
+        target_dir: ${{ runner.temp }}/noconf/.github/workflows
+
+    - name: Empty target_dir
+      id: empty
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/actionlint-skipped
+      with:
+        target_dir: ${{ runner.temp }}/empty
+
+    - name: Assert
+      id: assert
+      env:
+        DEFAULT: ${{ steps.default.outcome }}/${{ steps.default.outputs.exitcode }}/${{ steps.default.outputs.skipped }}/${{ steps.default.outputs.stdout }}${{ steps.default.outputs.stderr }}
+        CONF: ${{ steps.conf.outcome }}/${{ steps.conf.outputs.exitcode }}/${{ steps.conf.outputs.skipped }}/${{ steps.conf.outputs.stdout }}${{ steps.conf.outputs.stderr }}
+        NOCONF_OUTCOME: ${{ steps.noconf.outcome }}
+        NOCONF_EXITCODE: ${{ steps.noconf.outputs.exitcode }}
+        NOCONF_OUTPUT: ${{ steps.noconf.outputs.stdout }}${{ steps.noconf.outputs.stderr }}
+        EMPTY: ${{ steps.empty.outcome }}/${{ steps.empty.outputs.exitcode }}/${{ steps.empty.outputs.skipped }}/${{ steps.empty.outputs.stdout }}${{ steps.empty.outputs.stderr }}
+      run: |
+        for v in DEFAULT CONF NOCONF_OUTCOME NOCONF_EXITCODE NOCONF_OUTPUT EMPTY; do
+          printf '%s=<%s>\n' "$v" "${!v}"
+        done
+
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$DEFAULT" "success/0//" "default target_dir lints .github/workflows cleanly"
+        check "$CONF" "success/0//" "custom target_dir with trailing slash; config discovered from the fixture project"
+        check "$NOCONF_OUTCOME" "failure" "without config the custom label fails the step"
+        check "$NOCONF_EXITCODE" "1" "findings report exitcode 1"
+        case "$NOCONF_OUTPUT" in *my-custom-runner*) echo "PASS findings are in the captured output";; *) echo "FAIL findings missing from the captured output"; failed=1;; esac
+        check "$EMPTY" "success//true/" "empty target_dir is skipped with empty outputs"
+        exit "$failed"
