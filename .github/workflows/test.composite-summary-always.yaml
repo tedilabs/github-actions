@@ -54,7 +54,10 @@ jobs:
         CJ_OUTCOME: ${{ steps.cj.outcome }}
         FMT_OUTCOME: ${{ steps.fmt.outcome }}
       run: |
-        echo "--- job summary so far ---"; cat "$GITHUB_STEP_SUMMARY"; echo "--- end ---"
+        # Every step gets its own summary file, so read all of them from the runner's file-command directory.
+        summary_dir="$(dirname "$GITHUB_STEP_SUMMARY")"
+        echo "--- job summary so far ---"; cat "$summary_dir"/step_summary_* 2>/dev/null; echo "--- end ---"
+        GITHUB_STEP_SUMMARY="$(mktemp)"; cat "$summary_dir"/step_summary_* > "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
         failed=0
         check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
         check "$CJ_OUTCOME" "failure" "check-jsonschema failed as expected"
