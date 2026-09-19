@@ -86,8 +86,9 @@ runs:
       FILES: ${{ steps.target.outputs.files }}
     with:
       run: |
-        printf '%s\n' "$FILES" | tr '\n' '\0' \
-          | xargs -0 check-jsonschema --builtin-schema "$SCHEMA"
+        # Pass the files as arguments rather than through `xargs`, which would report any failure as exit code 123.
+        readarray -t files <<< "$FILES"
+        check-jsonschema --builtin-schema "$SCHEMA" "${files[@]}"
 
   - name: Add Failure Details to Job Summary
     id: validate-summary
