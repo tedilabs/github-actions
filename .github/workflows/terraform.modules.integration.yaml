@@ -27,26 +27,11 @@ on:
         default: "2"
         description: "(Optional) The maximum depth of the changed directories to check. For example, `modules/foo/bar.tf` with a max depth of `2` is checked as `modules/foo`. Defaults to `2`."
 
-      terraform_version:
-        type: string
-        required: false
-        default: latest
-        description: "(Optional) The version of `terraform` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. A version prefix such as `1.13` installs the latest matching release. Defaults to `latest`."
       terraform_host:
         type: string
         required: false
         default: app.terraform.io
         description: "(Optional) The hostname of the Terraform Cloud/Enterprise instance that the `terraform_token` secret authenticates to. Defaults to `app.terraform.io`."
-      tflint_version:
-        type: string
-        required: false
-        default: latest
-        description: "(Optional) The version of `tflint` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
-      terraform_docs_version:
-        type: string
-        required: false
-        default: latest
-        description: "(Optional) The version of `terraform-docs` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
 
       fmt_enabled:
         type: boolean
@@ -82,7 +67,7 @@ on:
         type: boolean
         required: false
         default: false
-        description: "(Optional) Whether to check that `README.md` is up to date with `terraform-docs`. Directories without a `README.md` are skipped. The check only passes when CI reproduces the local generation: pin `terraform_docs_version` to the version used with pre-commit, and either commit `.terraform.lock.hcl` or set `settings.lockfile: false` in `.terraform-docs.yml` so the provider version column does not depend on a local lock file. Defaults to `false`."
+        description: "(Optional) Whether to check that `README.md` is up to date with `terraform-docs`. Directories without a `README.md` are skipped. The check only passes when CI reproduces the local generation: pin `terraform-docs` in the repository's `mise.toml` to the version used with pre-commit, and either commit `.terraform.lock.hcl` or set `settings.lockfile: false` in `.terraform-docs.yml` so the provider version column does not depend on a local lock file. Defaults to `false`."
       terraform_docs_config_file:
         type: string
         required: false
@@ -160,28 +145,18 @@ jobs:
       id: checkout
       uses: actions/checkout@v7
 
-    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
-    # still take precedence while a self-hosted runner's real global config is left untouched.
-    - name: Set Default Tool Versions
-      id: default-tools
-      env:
-        TERRAFORM_VERSION: ${{ inputs.terraform_version }}
-        TFLINT_VERSION: ${{ inputs.tflint_version }}
-        TERRAFORM_DOCS_VERSION: ${{ inputs.terraform_docs_version }}
-      run: |
-        config_file="$RUNNER_TEMP/mise-defaults.toml"
-        cat > "$config_file" <<TOML
-        [tools]
-        terraform = "$TERRAFORM_VERSION"
-        tflint = "$TFLINT_VERSION"
-        terraform-docs = "$TERRAFORM_DOCS_VERSION"
-        TOML
-
-        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
-
+    # The tools and their versions come from the repository's mise config (`mise.toml` or `.tool-versions`).
+    # The module directory is passed so a `mise.toml` placed there overrides the repository-wide one,
+    # and only the tools the enabled checks need are installed.
     - name: Set up tools
       id: setup-tools
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        working_directory: ${{ matrix.path }}
+        install_args: >-
+          terraform
+          ${{ inputs.tflint_enabled && 'tflint' || '' }}
+          ${{ inputs.terraform_docs_enabled && 'terraform-docs' || '' }}
 
     - name: Configure Terraform Credentials
       id: configure-credentials
