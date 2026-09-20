@@ -45,8 +45,12 @@ runs:
       target_dir="${target_dir:-.}"
       echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
 
-      # `actionlint` exits 3 when it finds no workflows directory, so an empty target is skipped instead of failing.
-      files=$(find "$target_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
+      # `actionlint` exits 3 when it finds no workflows directory, so an empty or missing target is skipped instead
+      # of failing; `find` would fail on a missing directory too.
+      files=""
+      if [ -d "$target_dir" ]; then
+        files=$(find "$target_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+      fi
       if [ -z "$files" ]; then
         echo "::notice::Skipping actionlint: no workflow files in $target_dir."
         echo "skipped=true" >> "$GITHUB_OUTPUT"
