@@ -188,6 +188,7 @@ jobs:
       with:
         target_dir: ${{ matrix.project }}
         workspace: ${{ matrix.workspace }}
+        validate_query: "true"
 
     - name: Lint (tflint)
       id: tflint
