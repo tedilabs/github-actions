@@ -160,7 +160,10 @@ jobs:
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
       with:
         working_directory: ${{ matrix.project }}${{ matrix.workspace && format('/{0}', matrix.workspace) || '' }}
-        install_args: terraform${{ inputs.tflint_enabled && ' tflint' || '' }}${{ inputs.terraform_docs_enabled && ' terraform-docs' || '' }}
+        install_args: >-
+          terraform
+          ${{ inputs.tflint_enabled && 'tflint' || '' }}
+          ${{ inputs.terraform_docs_enabled && 'terraform-docs' || '' }}
 
     - name: Configure Terraform Credentials
       id: configure-credentials
