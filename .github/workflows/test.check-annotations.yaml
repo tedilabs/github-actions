@@ -1,0 +1,70 @@
+name: Test - check annotations
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          terraform = "1.16.3"
+          tflint = "0.64.0"
+          actionlint = "latest"
+          shellcheck = "latest"
+
+    - name: terraform validate (annotated)
+      id: validate
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.validate@feat/check-annotations
+      with:
+        target_dir: fixtures/annotations/terraform
+
+    - name: tflint (annotated)
+      id: tflint
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.tflint@feat/check-annotations
+      with:
+        target_dir: fixtures/annotations/terraform
+
+    - name: actionlint (annotated)
+      id: actionlint
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/check-annotations
+      with:
+        target_dir: fixtures/annotations/workflows
+
+    - name: actionlint (annotations disabled, for comparison)
+      id: actionlint-off
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@feat/check-annotations
+      with:
+        target_dir: fixtures/annotations/workflows
+        annotations_enabled: "false"
+
+    - name: Outcomes
+      id: outcomes
+      env:
+        VALIDATE: ${{ steps.validate.outcome }}/${{ steps.validate.outputs.exitcode }}
+        TFLINT: ${{ steps.tflint.outcome }}/${{ steps.tflint.outputs.exitcode }}
+        ACTIONLINT: ${{ steps.actionlint.outcome }}/${{ steps.actionlint.outputs.exitcode }}
+        ACTIONLINT_OFF: ${{ steps.actionlint-off.outcome }}/${{ steps.actionlint-off.outputs.exitcode }}
+      run: |
+        for v in VALIDATE TFLINT ACTIONLINT ACTIONLINT_OFF; do printf '%s=<%s>\n' "$v" "${!v}"; done
+        for v in VALIDATE TFLINT ACTIONLINT ACTIONLINT_OFF; do [ "${!v%%/*}" = "failure" ] || { echo "FAIL $v should fail on the fixtures"; exit 1; }; done
+        echo "All four checks failed as intended; the annotations are on the run summary and in the Files changed tab."

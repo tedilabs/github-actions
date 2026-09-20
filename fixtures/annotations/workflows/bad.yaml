@@ -1,0 +1,6 @@
+on: push
+jobs:
+  x:
+    runs-on: my-custom-runner
+    steps:
+    - run: echo ${{ github.event.issue.title }}
