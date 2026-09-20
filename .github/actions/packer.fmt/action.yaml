@@ -11,6 +11,10 @@ inputs:
     required: false
     default: "true"
     description: "(Optional) Whether to also check subdirectories. Defaults to `true`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the unformatted lines in the pull request when `packer fmt` fails, from the hunks of the diff it printed. Defaults to `true`."
 
 outputs:
   skipped:
@@ -65,6 +69,24 @@ runs:
         fi
 
         packer fmt "${args[@]}" "$TARGET_DIR"
+
+  # The diff already names each file (`+++ new/<file>`) and the first line of every hunk (`@@ -a,b +c,d @@`), so
+  # the annotations are read from the captured output. `packer fmt` prints the paths as given, relative to the
+  # repository.
+  - name: Annotate Findings
+    id: fmt-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.fmt.outcome == 'failure'
+    shell: bash
+    env:
+      LOG_FILE: ${{ steps.fmt.outputs.log_file }}
+    run: |
+      awk '
+        /^\+\+\+ new\// { file = substr($0, 9); next }
+        /^@@ / && file != "" {
+          line = $3; sub(/^\+/, "", line); sub(/,.*/, "", line)
+          printf "::error file=%s,line=%s,title=packer fmt · Not formatted::Run `packer fmt` to format this file.\n", file, line
+        }
+      ' "$LOG_FILE"
 
   - name: Add Failure Details to Job Summary
     id: fmt-summary

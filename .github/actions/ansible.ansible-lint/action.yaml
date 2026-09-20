@@ -10,6 +10,10 @@ inputs:
   requirements_file:
     required: false
     description: "(Optional) The path to a Galaxy requirements file, relative to the repository root (e.g. `ansible/requirements.yaml`). When set, its collections are installed outside the checkout and exposed to `ansible-lint` through `ANSIBLE_COLLECTIONS_PATH`, so they are resolvable but never linted. When omitted, `ansible-lint` installs a `requirements.yml` found in the project directory on its own."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the reported lines in the pull request when `ansible-lint` fails, by re-running it with `-f json` and turning each finding into a workflow error, warning, or notice. Defaults to `true`."
 
 outputs:
   skipped:
@@ -92,8 +96,41 @@ runs:
           export ANSIBLE_COLLECTIONS_PATH="$COLLECTIONS_PATH"
         fi
 
-        # Under GitHub Actions, `ansible-lint` emits workflow annotations on its own.
-        ansible-lint --nocolor
+        # Under GitHub Actions, `ansible-lint` emits annotations on its own, with paths relative to this directory
+        # rather than the repository and without the tool in the title, so they are turned off here and produced
+        # from its JSON output in the next step instead.
+        GITHUB_ACTIONS=false ansible-lint --nocolor
+
+  # GitHub only renders annotations from `::error` lines, so the findings are re-read as JSON. Paths are relative
+  # to the project directory, so `target_dir` is prefixed.
+  - name: Annotate Findings
+    id: ansible-lint-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.ansible-lint.outcome == 'failure'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      COLLECTIONS_PATH: ${{ steps.target.outputs.collections_path }}
+    run: |
+      if [ -n "$COLLECTIONS_PATH" ]; then
+        export ANSIBLE_COLLECTIONS_PATH="$COLLECTIONS_PATH"
+      fi
+
+      prefix=""
+      if [ "$TARGET_DIR" != "." ]; then
+        prefix="$TARGET_DIR/"
+      fi
+
+      # A workflow command takes one line, so newlines and the property separators are percent-encoded the way
+      # the runner decodes them.
+      cd "$TARGET_DIR"
+      GITHUB_ACTIONS=false ansible-lint --nocolor -f json 2>/dev/null | jq -r --arg prefix "$prefix" '
+        def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+        def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
+        .[]
+        | (if .severity == "minor" then "warning" elif .severity == "info" then "notice" else "error" end) as $severity
+        | (if (.location.lines.begin // 0) > 0 then ",line=\(.location.lines.begin)" else "" end) as $line
+        | "::\($severity) file=\($prefix + .location.path)\($line),title=\("ansible-lint · " + .check_name | prop)::\(.description | esc)"
+      ' || true
 
   - name: Add Failure Details to Job Summary
     id: ansible-lint-summary
