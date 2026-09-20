@@ -1,0 +1,74 @@
+name: Test - missing target dir
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          actionlint = "latest"
+          "pipx:check-jsonschema" = "latest"
+
+    - name: check-jsonschema actions on a missing directory
+      id: cj-actions
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@fix/check-missing-target-dir
+      with:
+        schema_type: actions
+        target_dir: ${{ runner.temp }}/does/not/exist
+
+    - name: check-jsonschema workflows on a missing directory
+      id: cj-workflows
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@fix/check-missing-target-dir
+      with:
+        schema_type: workflows
+        target_dir: ${{ runner.temp }}/does/not/exist
+
+    - name: actionlint on a missing directory
+      id: al
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@fix/check-missing-target-dir
+      with:
+        target_dir: ${{ runner.temp }}/does/not/exist
+
+    - name: check-jsonschema actions on this repository (still validates)
+      id: cj-real
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@fix/check-missing-target-dir
+      with:
+        schema_type: actions
+
+    - name: Assert
+      id: assert
+      env:
+        CJ_ACTIONS: ${{ steps.cj-actions.outcome }}/${{ steps.cj-actions.outputs.skipped }}/${{ steps.cj-actions.outputs.exitcode }}
+        CJ_WORKFLOWS: ${{ steps.cj-workflows.outcome }}/${{ steps.cj-workflows.outputs.skipped }}/${{ steps.cj-workflows.outputs.exitcode }}
+        AL: ${{ steps.al.outcome }}/${{ steps.al.outputs.skipped }}/${{ steps.al.outputs.exitcode }}
+        CJ_REAL: ${{ steps.cj-real.outcome }}/${{ steps.cj-real.outputs.skipped }}/${{ steps.cj-real.outputs.exitcode }}
+      run: |
+        for v in CJ_ACTIONS CJ_WORKFLOWS AL CJ_REAL; do printf '%s=<%s>\n' "$v" "${!v}"; done
+        failed=0
+        check() { if [ "$1" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got '$1', want '$2'"; failed=1; fi; }
+        check "$CJ_ACTIONS" "success/true/" "check-jsonschema actions skips a missing directory"
+        check "$CJ_WORKFLOWS" "success/true/" "check-jsonschema workflows skips a missing directory"
+        check "$AL" "success/true/" "actionlint skips a missing directory"
+        check "$CJ_REAL" "success//0" "check-jsonschema actions still validates an existing directory"
+        exit "$failed"
