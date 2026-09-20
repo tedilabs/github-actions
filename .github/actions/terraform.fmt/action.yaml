@@ -11,6 +11,10 @@ inputs:
     required: false
     default: "true"
     description: "(Optional) Whether to also check subdirectories. Defaults to `true`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the unformatted lines in the pull request when `terraform fmt` fails, from the hunks of the diff it printed. Defaults to `true`."
 
 outputs:
   skipped:
@@ -65,6 +69,29 @@ runs:
         fi
 
         terraform -chdir="$TARGET_DIR" fmt "${args[@]}"
+
+  # The diff already names each file (`+++ new/<file>`) and the first line of every hunk (`@@ -a,b +c,d @@`), so
+  # the annotations are read from the captured output. Paths are relative to `target_dir`.
+  - name: Annotate Findings
+    id: fmt-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.fmt.outcome == 'failure'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      LOG_FILE: ${{ steps.fmt.outputs.log_file }}
+    run: |
+      prefix=""
+      if [ "$TARGET_DIR" != "." ]; then
+        prefix="$TARGET_DIR/"
+      fi
+
+      awk -v prefix="$prefix" '
+        /^\+\+\+ new\// { file = substr($0, 9); next }
+        /^@@ / && file != "" {
+          line = $3; sub(/^\+/, "", line); sub(/,.*/, "", line)
+          printf "::error file=%s%s,line=%s,title=terraform fmt · Not formatted::Run `terraform fmt` to format this file.\n", prefix, file, line
+        }
+      ' "$LOG_FILE"
 
   - name: Add Failure Details to Job Summary
     id: fmt-summary
