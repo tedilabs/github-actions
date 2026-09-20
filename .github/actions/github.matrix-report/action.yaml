@@ -67,7 +67,6 @@ runs:
     shell: bash
     env:
       ID: ${{ inputs.id }}
-      ID_LABEL: ${{ inputs.id_label }}
       RESULTS: ${{ inputs.results }}
       JOB_STATUS: ${{ inputs.job_status }}
     run: |
@@ -85,13 +84,6 @@ runs:
       mkdir -p "$dir"
       jq -n --arg id "$ID" --arg job_status "$JOB_STATUS" --argjson results "$results" \
         '{id: $id, job_status: $job_status, results: $results}' > "$dir/$key.json"
-
-      {
-        echo "| $ID_LABEL | $(jq -r 'keys_unsorted | join(" | ")' <<< "$results") |"
-        echo "|---|$(jq -r 'keys_unsorted | map(":-:") | join("|")' <<< "$results")|"
-        echo "| $ID | $(jq -r 'def icon: {success: "✅", failure: "❌", skipped: "⏭️", cancelled: "⚠️"}[.] // .; [.[]] | map(icon) | join(" | ")' <<< "$results") |"
-        echo
-      } >> "$GITHUB_STEP_SUMMARY"
 
       echo "key=$key" >> "$GITHUB_OUTPUT"
 
