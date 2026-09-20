@@ -35,6 +35,13 @@ jobs:
       with:
         target_dir: fixtures/annotations/terraform
 
+    - name: terraform validate (annotated, fails at init)
+      id: validate-init
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.validate@feat/check-annotations
+      with:
+        target_dir: fixtures/annotations/terraform-init
+
     - name: tflint (annotated)
       id: tflint
       continue-on-error: true
@@ -61,10 +68,11 @@ jobs:
       id: outcomes
       env:
         VALIDATE: ${{ steps.validate.outcome }}/${{ steps.validate.outputs.exitcode }}
+        VALIDATE_INIT: ${{ steps.validate-init.outcome }}/${{ steps.validate-init.outputs.exitcode }}
         TFLINT: ${{ steps.tflint.outcome }}/${{ steps.tflint.outputs.exitcode }}
         ACTIONLINT: ${{ steps.actionlint.outcome }}/${{ steps.actionlint.outputs.exitcode }}
         ACTIONLINT_OFF: ${{ steps.actionlint-off.outcome }}/${{ steps.actionlint-off.outputs.exitcode }}
       run: |
-        for v in VALIDATE TFLINT ACTIONLINT ACTIONLINT_OFF; do printf '%s=<%s>\n' "$v" "${!v}"; done
-        for v in VALIDATE TFLINT ACTIONLINT ACTIONLINT_OFF; do [ "${!v%%/*}" = "failure" ] || { echo "FAIL $v should fail on the fixtures"; exit 1; }; done
-        echo "All four checks failed as intended; the annotations are on the run summary and in the Files changed tab."
+        for v in VALIDATE VALIDATE_INIT TFLINT ACTIONLINT ACTIONLINT_OFF; do printf '%s=<%s>\n' "$v" "${!v}"; done
+        for v in VALIDATE VALIDATE_INIT TFLINT ACTIONLINT ACTIONLINT_OFF; do [ "${!v%%/*}" = "failure" ] || { echo "FAIL $v should fail on the fixtures"; exit 1; }; done
+        echo "All five checks failed as intended; the annotations are on the run summary and in the Files changed tab."
