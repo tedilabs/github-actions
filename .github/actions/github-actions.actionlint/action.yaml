@@ -17,7 +17,7 @@ inputs:
   annotations_enabled:
     required: false
     default: "true"
-    description: "(Optional) Whether to annotate the reported lines in the pull request through a problem matcher. Defaults to `true`."
+    description: "(Optional) Whether to annotate the reported lines in the pull request when `actionlint` fails, by re-running it with a JSON format and turning each finding into a workflow error. Defaults to `true`."
 
 outputs:
   skipped:
@@ -70,14 +70,6 @@ runs:
 
       actionlint -version | head -n 1
 
-  - name: Register Problem Matcher
-    id: matcher
-    if: steps.target.outputs.skipped != 'true' && inputs.annotations_enabled == 'true'
-    shell: bash
-    env:
-      ACTION_PATH: ${{ github.action_path }}
-    run: echo "::add-matcher::$ACTION_PATH/problem-matcher.json"
-
   - name: Run actionlint
     id: actionlint
     if: steps.target.outputs.skipped != 'true'
@@ -100,11 +92,34 @@ runs:
         readarray -t files <<< "$FILES"
         actionlint "${args[@]}" "${files[@]}"
 
-  - name: Remove Problem Matcher
-    id: matcher-remove
-    if: always() && steps.matcher.outcome == 'success'
+  # GitHub only renders annotations from `::error` lines, so the findings are re-read as JSON. The files are passed
+  # repository-relative, and `actionlint` reports them as given.
+  - name: Annotate Findings
+    id: actionlint-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.actionlint.outcome == 'failure'
     shell: bash
-    run: echo "::remove-matcher owner=actionlint::"
+    env:
+      FILES: ${{ steps.target.outputs.files }}
+      CONFIG: ${{ steps.target.outputs.config }}
+      SHELLCHECK_ENABLED: ${{ inputs.shellcheck_enabled }}
+    run: |
+      args=(-no-color -format '{{json .}}')
+      if [ -n "$CONFIG" ]; then
+        args+=(-config-file "$CONFIG")
+      fi
+      if [ "$SHELLCHECK_ENABLED" != "true" ]; then
+        args+=(-shellcheck=)
+      fi
+
+      # A workflow command takes one line, so newlines and the property separators are percent-encoded the way
+      # the runner decodes them.
+      readarray -t files <<< "$FILES"
+      actionlint "${args[@]}" "${files[@]}" 2>/dev/null | jq -r '
+        def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+        def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
+        .[]
+        | "::error file=\(.filepath),line=\(.line),col=\(.column)\(if (.end_column // 0) > 0 then ",endColumn=\(.end_column)" else "" end),title=\("actionlint · " + .kind | prop)::\(.message | esc)"
+      ' || true
 
   - name: Add Failure Details to Job Summary
     id: actionlint-summary

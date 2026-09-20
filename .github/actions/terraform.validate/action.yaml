@@ -137,9 +137,11 @@ runs:
       fi
 
       if [ "$INIT_OUTCOME" = "failure" ]; then
+        tool="terraform init"
         args=(init -backend=false -input=false -json)
         filter='select(.type == "diagnostic") | .diagnostic'
       else
+        tool="terraform validate"
         args=(validate -json)
         if [ "$VALIDATE_TESTS" != "true" ]; then
           args+=(-no-tests)
@@ -159,15 +161,15 @@ runs:
 
       # Paths are relative to the module, and a workflow command takes one line, so newlines and the
       # property separators are percent-encoded the way the runner decodes them.
-      terraform -chdir="$TARGET_DIR" "${args[@]}" 2>/dev/null | jq -c "$filter" | jq -r --arg prefix "$prefix" '
+      terraform -chdir="$TARGET_DIR" "${args[@]}" 2>/dev/null | jq -c "$filter" | jq -r --arg prefix "$prefix" --arg tool "$tool" '
         def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
         def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
         (if .severity == "error" then "error" else "warning" end) as $severity
         | (.summary + (if (.detail // "") != "" then "\n\n" + .detail else "" end) | esc) as $message
         | if .range then
-            "::\($severity) file=\($prefix + .range.filename),line=\(.range.start.line),col=\(.range.start.column),endLine=\(.range.end.line),endColumn=\(.range.end.column),title=\(.summary | prop)::\($message)"
+            "::\($severity) file=\($prefix + .range.filename),line=\(.range.start.line),col=\(.range.start.column),endLine=\(.range.end.line),endColumn=\(.range.end.column),title=\($tool + " · " + .summary | prop)::\($message)"
           else
-            "::\($severity) title=\(.summary | prop)::\($message)"
+            "::\($severity) title=\($tool + " · " + .summary | prop)::\($message)"
           end
       ' || true
 

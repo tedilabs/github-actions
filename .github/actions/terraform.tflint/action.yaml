@@ -34,7 +34,7 @@ inputs:
   annotations_enabled:
     required: false
     default: "true"
-    description: "(Optional) Whether to annotate the reported lines in the pull request through a problem matcher. Only works with the `compact` format. Defaults to `true`."
+    description: "(Optional) Whether to annotate the reported lines in the pull request when `tflint` fails, by re-running it with `--format json` and turning each issue into a workflow error, warning, or notice. Defaults to `true`."
 
 outputs:
   skipped:
@@ -126,14 +126,6 @@ runs:
       file: ${{ steps.init.outputs.log_file }}
       lang: text
 
-  - name: Register Problem Matcher
-    id: matcher
-    if: steps.target.outputs.skipped != 'true' && inputs.annotations_enabled == 'true' && inputs.format == 'compact'
-    shell: bash
-    env:
-      ACTION_PATH: ${{ github.action_path }}
-    run: echo "::add-matcher::$ACTION_PATH/problem-matcher.json"
-
   - name: Run TFLint
     id: tflint
     if: steps.target.outputs.skipped != 'true'
@@ -158,11 +150,39 @@ runs:
           --format "$FORMAT" \
           --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY"
 
-  - name: Remove Problem Matcher
-    id: matcher-remove
-    if: always() && steps.matcher.outcome == 'success'
+  # GitHub only renders annotations from `::error` lines, so the issues are re-read as JSON. The paths in that
+  # output are relative to the working directory, so they already point into the repository.
+  - name: Annotate Findings
+    id: tflint-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.tflint.outcome == 'failure'
     shell: bash
-    run: echo "::remove-matcher owner=tflint::"
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      CONFIG: ${{ steps.target.outputs.config }}
+      RECURSIVE: ${{ inputs.recursive }}
+    run: |
+      args=(--chdir "$TARGET_DIR")
+      if [ -n "$CONFIG" ]; then
+        args+=(--config "$CONFIG")
+      fi
+      if [ "$RECURSIVE" = "true" ]; then
+        args+=(--recursive)
+      fi
+
+      # A workflow command takes one line, so newlines and the property separators are percent-encoded the way
+      # the runner decodes them.
+      tflint "${args[@]}" --format json 2>/dev/null | jq -r '
+        def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+        def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
+        (.issues[] | {severity: .rule.severity, title: ("tflint · " + .rule.name), message, range}),
+        (.errors[] | {severity: (.severity // "error"), title: "tflint", message, range})
+        | (if .severity == "error" then "error" elif .severity == "warning" then "warning" else "notice" end) as $severity
+        | if .range then
+            "::\($severity) file=\(.range.filename),line=\(.range.start.line),col=\(.range.start.column),endLine=\(.range.end.line),endColumn=\(.range.end.column),title=\(.title | prop)::\(.message | esc)"
+          else
+            "::\($severity) title=\(.title | prop)::\(.message | esc)"
+          end
+      ' || true
 
   - name: Add Failure Details to Job Summary
     id: tflint-summary
