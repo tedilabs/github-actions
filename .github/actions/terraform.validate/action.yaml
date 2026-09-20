@@ -10,6 +10,18 @@ inputs:
   workspace:
     required: false
     description: "(Optional) The Terraform workspace name to validate as, exported as `TF_WORKSPACE`. Needed when the configuration references `terraform.workspace` (e.g. to locate `<workspace>/config.yaml`). Defaults to Terraform's `default` workspace."
+  validate_tests:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to also validate the test files (`*.tftest.hcl`) under `test_directory`. Set to `false` to pass `-no-tests`. Defaults to `true`."
+  test_directory:
+    required: false
+    default: tests
+    description: "(Optional) The directory holding the test files, relative to `target_dir`, passed as `-test-directory`. Only used when `validate_tests` is `true`. Defaults to `tests`."
+  validate_query:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to also validate the query files (`*.tfquery.hcl`) by passing `-query`, which needs Terraform 1.14 or later. Defaults to `false`."
 
 outputs:
   skipped:
@@ -81,13 +93,26 @@ runs:
     env:
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
+      VALIDATE_TESTS: ${{ inputs.validate_tests }}
+      TEST_DIRECTORY: ${{ inputs.test_directory }}
+      VALIDATE_QUERY: ${{ inputs.validate_query }}
     with:
       run: |
         if [ -n "$WORKSPACE" ]; then
           export TF_WORKSPACE="$WORKSPACE"
         fi
 
-        terraform -chdir="$TARGET_DIR" validate -no-color
+        args=(-no-color)
+        if [ "$VALIDATE_TESTS" != "true" ]; then
+          args+=(-no-tests)
+        elif [ -n "$TEST_DIRECTORY" ]; then
+          args+=(-test-directory="$TEST_DIRECTORY")
+        fi
+        if [ "$VALIDATE_QUERY" = "true" ]; then
+          args+=(-query)
+        fi
+
+        terraform -chdir="$TARGET_DIR" validate "${args[@]}"
 
   - name: Add Failure Details to Job Summary
     id: validate-summary
