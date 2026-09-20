@@ -1,0 +1,81 @@
+name: Test - check annotations remaining
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          terraform = "1.16.3"
+          terraform-docs = "0.24.0"
+          "pipx:check-jsonschema" = "latest"
+
+    - name: terraform fmt (annotated)
+      id: fmt
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.fmt@feat/check-annotations-remaining
+      with:
+        target_dir: fixtures/annotations2/tf
+
+    - name: terraform-docs (annotated, recursive)
+      id: docs
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.docs@feat/check-annotations-remaining
+      with:
+        target_dir: fixtures/annotations2/docs
+        check: "true"
+        recursive: "true"
+
+    - name: check-jsonschema workflows (annotated)
+      id: cj-workflows
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-annotations-remaining
+      with:
+        schema_type: workflows
+        target_dir: fixtures/annotations2/workflows
+
+    - name: check-jsonschema actions (annotated)
+      id: cj-actions
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@feat/check-annotations-remaining
+      with:
+        schema_type: actions
+        target_dir: fixtures/annotations2/actions
+
+    - name: terraform fmt (annotations disabled, for comparison)
+      id: fmt-off
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.fmt@feat/check-annotations-remaining
+      with:
+        target_dir: fixtures/annotations2/tf
+        annotations_enabled: "false"
+
+    - name: Outcomes
+      id: outcomes
+      env:
+        FMT: ${{ steps.fmt.outcome }}/${{ steps.fmt.outputs.exitcode }}
+        DOCS: ${{ steps.docs.outcome }}/${{ steps.docs.outputs.exitcode }}
+        CJ_WORKFLOWS: ${{ steps.cj-workflows.outcome }}/${{ steps.cj-workflows.outputs.exitcode }}
+        CJ_ACTIONS: ${{ steps.cj-actions.outcome }}/${{ steps.cj-actions.outputs.exitcode }}
+        FMT_OFF: ${{ steps.fmt-off.outcome }}/${{ steps.fmt-off.outputs.exitcode }}
+      run: |
+        for v in FMT DOCS CJ_WORKFLOWS CJ_ACTIONS FMT_OFF; do printf '%s=<%s>\n' "$v" "${!v}"; done
+        for v in FMT DOCS CJ_WORKFLOWS CJ_ACTIONS FMT_OFF; do [ "${!v%%/*}" = "failure" ] || { echo "FAIL $v should fail on the fixtures"; exit 1; }; done
+        echo "All five checks failed as intended."

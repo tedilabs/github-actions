@@ -1,0 +1,6 @@
+name: bad
+on: push
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps: not-a-list
