@@ -11,6 +11,10 @@ inputs:
     required: false
     default: ${{ github.token }}
     description: "(Optional) The GitHub token used by `packer init` to download plugins from GitHub without hitting the anonymous rate limit, exported as `PACKER_GITHUB_API_TOKEN`. Defaults to the automatically generated `github.token`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the failing lines in the pull request when `packer validate` fails, from the `Error:` and `on <file> line <n>` lines it printed. Defaults to `true`."
 
 outputs:
   skipped:
@@ -80,6 +84,25 @@ runs:
     with:
       run: |
         packer validate "$TARGET_DIR"
+
+  # `packer validate` has no machine-readable output, but each diagnostic prints `Error: <summary>` followed by
+  # `on <file> line <n>:` with the path as given, relative to the repository.
+  - name: Annotate Findings
+    id: validate-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.validate.outcome == 'failure'
+    shell: bash
+    env:
+      LOG_FILE: ${{ steps.validate.outputs.log_file }}
+    run: |
+      awk '
+        /^(Error|Warning): / { severity = tolower($1); sub(/:$/, "", severity); summary = substr($0, index($0, ": ") + 2); next }
+        /^[[:space:]]+on .+ line [0-9]+/ && summary != "" {
+          file = $2; line = $4; sub(/[:,].*$/, "", line)
+          gsub(/%/, "%25", summary)
+          printf "::%s file=%s,line=%s,title=packer validate · %s::%s\n", severity, file, line, summary, summary
+          summary = ""
+        }
+      ' "$LOG_FILE"
 
   - name: Add Failure Details to Job Summary
     id: validate-summary
