@@ -25,7 +25,7 @@ inputs:
   annotations_enabled:
     required: false
     default: "true"
-    description: "(Optional) Whether to annotate the failing lines in the pull request when `terraform validate` fails, by re-running it with `-json` and turning each diagnostic into a workflow error or warning. Defaults to `true`."
+    description: "(Optional) Whether to annotate the failing lines in the pull request when `terraform init` or `terraform validate` fails, by re-running the failed command with `-json` and turning each diagnostic into a workflow error or warning. Defaults to `true`."
 
 outputs:
   skipped:
@@ -118,12 +118,14 @@ runs:
 
         terraform -chdir="$TARGET_DIR" validate "${args[@]}"
 
-  # GitHub only renders annotations from `::error` lines, so the diagnostics are re-read as JSON rather than parsed from the text.
+  # GitHub only renders annotations from `::error` lines, so the diagnostics are re-read as JSON rather than parsed
+  # from the text. A syntax error fails `init`, which loads the configuration, so both commands are covered.
   - name: Annotate Findings
     id: validate-annotate
-    if: always() && inputs.annotations_enabled == 'true' && steps.validate.outcome == 'failure'
+    if: always() && inputs.annotations_enabled == 'true' && (steps.init.outcome == 'failure' || steps.validate.outcome == 'failure')
     shell: bash
     env:
+      INIT_OUTCOME: ${{ steps.init.outcome }}
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
       WORKSPACE: ${{ inputs.workspace }}
       VALIDATE_TESTS: ${{ inputs.validate_tests }}
@@ -134,14 +136,20 @@ runs:
         export TF_WORKSPACE="$WORKSPACE"
       fi
 
-      args=(-json)
-      if [ "$VALIDATE_TESTS" != "true" ]; then
-        args+=(-no-tests)
-      elif [ -n "$TEST_DIRECTORY" ]; then
-        args+=(-test-directory="$TEST_DIRECTORY")
-      fi
-      if [ "$VALIDATE_QUERY" = "true" ]; then
-        args+=(-query)
+      if [ "$INIT_OUTCOME" = "failure" ]; then
+        args=(init -backend=false -input=false -json)
+        filter='select(.type == "diagnostic") | .diagnostic'
+      else
+        args=(validate -json)
+        if [ "$VALIDATE_TESTS" != "true" ]; then
+          args+=(-no-tests)
+        elif [ -n "$TEST_DIRECTORY" ]; then
+          args+=(-test-directory="$TEST_DIRECTORY")
+        fi
+        if [ "$VALIDATE_QUERY" = "true" ]; then
+          args+=(-query)
+        fi
+        filter='.diagnostics[]?'
       fi
 
       prefix=""
@@ -151,11 +159,10 @@ runs:
 
       # Paths are relative to the module, and a workflow command takes one line, so newlines and the
       # property separators are percent-encoded the way the runner decodes them.
-      terraform -chdir="$TARGET_DIR" validate "${args[@]}" 2>/dev/null | jq -r --arg prefix "$prefix" '
+      terraform -chdir="$TARGET_DIR" "${args[@]}" 2>/dev/null | jq -c "$filter" | jq -r --arg prefix "$prefix" '
         def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
         def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
-        (.diagnostics // [])[]
-        | (if .severity == "error" then "error" else "warning" end) as $severity
+        (if .severity == "error" then "error" else "warning" end) as $severity
         | (.summary + (if (.detail // "") != "" then "\n\n" + .detail else "" end) | esc) as $message
         | if .range then
             "::\($severity) file=\($prefix + .range.filename),line=\(.range.start.line),col=\(.range.start.column),endLine=\(.range.end.line),endColumn=\(.range.end.column),title=\(.summary | prop)::\($message)"
