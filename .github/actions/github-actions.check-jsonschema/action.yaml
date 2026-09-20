@@ -56,12 +56,16 @@ runs:
       echo "schema=$schema" >> "$GITHUB_OUTPUT"
 
       # GitHub only reads workflow files directly in the workflows directory, while actions live in subdirectories.
-      if [ "$SCHEMA_TYPE" = "workflows" ]; then
-        files=$(find "$target_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
+      # A directory that does not exist holds nothing to validate and is skipped like an empty one; `find` would fail on it.
+      files=""
+      if [ ! -d "$target_dir" ]; then
+        :
+      elif [ "$SCHEMA_TYPE" = "workflows" ]; then
+        files=$(find "$target_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
       else
         files=$(
           find "$target_dir" -path '*/.git' -prune -o -path '*/node_modules' -prune -o \
-            -type f \( -name action.yml -o -name action.yaml \) -print 2>/dev/null | sort
+            -type f \( -name action.yml -o -name action.yaml \) -print | sort
         )
       fi
 
