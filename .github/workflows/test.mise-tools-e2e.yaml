@@ -1,0 +1,34 @@
+name: Test - mise tools e2e
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  workspaces:
+    name: Workspaces
+    uses: tedilabs/github-actions/.github/workflows/terraform.workspaces.integration.yaml@test/mise-tools-e2e
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      paths: fixtures/workspaces/**
+      project_marker_file: versions.tf
+      workspace_marker_file: config.yaml
+      tflint_enabled: true
+      terraform_docs_enabled: false
+
+  modules:
+    name: Modules
+    uses: tedilabs/github-actions/.github/workflows/terraform.modules.integration.yaml@test/mise-tools-e2e
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      paths: fixtures/modules/modules/**
+      paths_max_depth: "4"
+      tflint_enabled: true
+      terraform_docs_enabled: false
