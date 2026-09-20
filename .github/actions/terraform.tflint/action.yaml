@@ -31,6 +31,10 @@ inputs:
     required: false
     default: ${{ github.token }}
     description: "(Optional) The GitHub token used by `tflint --init` to download plugins from GitHub without hitting the anonymous rate limit. Defaults to the automatically generated `github.token`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the reported lines in the pull request through a problem matcher. Only works with the `compact` format. Defaults to `true`."
 
 outputs:
   skipped:
@@ -122,6 +126,14 @@ runs:
       file: ${{ steps.init.outputs.log_file }}
       lang: text
 
+  - name: Register Problem Matcher
+    id: matcher
+    if: steps.target.outputs.skipped != 'true' && inputs.annotations_enabled == 'true' && inputs.format == 'compact'
+    shell: bash
+    env:
+      ACTION_PATH: ${{ github.action_path }}
+    run: echo "::add-matcher::$ACTION_PATH/problem-matcher.json"
+
   - name: Run TFLint
     id: tflint
     if: steps.target.outputs.skipped != 'true'
@@ -145,6 +157,12 @@ runs:
         tflint "${args[@]}" \
           --format "$FORMAT" \
           --minimum-failure-severity "$MINIMUM_FAILURE_SEVERITY"
+
+  - name: Remove Problem Matcher
+    id: matcher-remove
+    if: always() && steps.matcher.outcome == 'success'
+    shell: bash
+    run: echo "::remove-matcher owner=tflint::"
 
   - name: Add Failure Details to Job Summary
     id: tflint-summary

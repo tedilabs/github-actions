@@ -14,6 +14,10 @@ inputs:
     required: false
     default: "true"
     description: "(Optional) Whether to check `run` scripts with `shellcheck`. Requires the `shellcheck` CLI on the `PATH`. Defaults to `true`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the reported lines in the pull request through a problem matcher. Defaults to `true`."
 
 outputs:
   skipped:
@@ -66,6 +70,14 @@ runs:
 
       actionlint -version | head -n 1
 
+  - name: Register Problem Matcher
+    id: matcher
+    if: steps.target.outputs.skipped != 'true' && inputs.annotations_enabled == 'true'
+    shell: bash
+    env:
+      ACTION_PATH: ${{ github.action_path }}
+    run: echo "::add-matcher::$ACTION_PATH/problem-matcher.json"
+
   - name: Run actionlint
     id: actionlint
     if: steps.target.outputs.skipped != 'true'
@@ -87,6 +99,12 @@ runs:
         # The files are passed explicitly; `actionlint` still discovers the config from the Git repository that holds them.
         readarray -t files <<< "$FILES"
         actionlint "${args[@]}" "${files[@]}"
+
+  - name: Remove Problem Matcher
+    id: matcher-remove
+    if: always() && steps.matcher.outcome == 'success'
+    shell: bash
+    run: echo "::remove-matcher owner=actionlint::"
 
   - name: Add Failure Details to Job Summary
     id: actionlint-summary
