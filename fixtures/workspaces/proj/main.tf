@@ -1,3 +1,3 @@
-locals {
-  workspace = terraform.workspace
+output "workspace" {
+  value = terraform.workspace
 }
