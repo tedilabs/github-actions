@@ -1,0 +1,70 @@
+name: Test - Packer and Ansible annotations
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          packer = "latest"
+          "pipx:ansible-lint" = "latest"
+
+    - name: packer fmt (annotated)
+      id: fmt
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.fmt@feat/packer-workflows
+      with:
+        target_dir: fixtures/annotations3/pk-fmt
+
+    - name: packer validate (annotated)
+      id: validate
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.validate@feat/packer-workflows
+      with:
+        target_dir: fixtures/annotations3/pk-validate
+
+    - name: ansible-lint (annotated)
+      id: lint
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@feat/packer-workflows
+      with:
+        target_dir: fixtures/annotations3/ansible
+
+    - name: ansible-lint (annotations disabled, for comparison)
+      id: lint-off
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@feat/packer-workflows
+      with:
+        target_dir: fixtures/annotations3/ansible
+        annotations_enabled: "false"
+
+    - name: Outcomes
+      id: outcomes
+      env:
+        FMT: ${{ steps.fmt.outcome }}/${{ steps.fmt.outputs.exitcode }}
+        VALIDATE: ${{ steps.validate.outcome }}/${{ steps.validate.outputs.exitcode }}
+        LINT: ${{ steps.lint.outcome }}/${{ steps.lint.outputs.exitcode }}
+        LINT_OFF: ${{ steps.lint-off.outcome }}/${{ steps.lint-off.outputs.exitcode }}
+        LINT_STDOUT: ${{ steps.lint.outputs.stdout }}
+      run: |
+        for v in FMT VALIDATE LINT LINT_OFF; do printf '%s=<%s>\n' "$v" "${!v}"; done
+        for v in FMT VALIDATE LINT LINT_OFF; do [ "${!v%%/*}" = "failure" ] || { echo "FAIL $v should fail on the fixtures"; exit 1; }; done
+        case "$LINT_STDOUT" in *"::error"*) echo "FAIL ansible-lint's own annotations leaked into stdout"; exit 1;; esac
+        echo "All four checks failed as intended, and ansible-lint's own annotations were suppressed."
