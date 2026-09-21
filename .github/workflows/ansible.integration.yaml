@@ -61,9 +61,13 @@ jobs:
 
         echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
 
+    # Only `python` is installed, since `ansible-lint` comes from `pip` below. A repository that pins other
+    # tools in its mise config does not pay to install them for a lint job that never runs them.
     - name: Set up tools
       id: setup-tools
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        install_args: python
 
     - name: Install ansible-lint
       id: install-ansible-lint
