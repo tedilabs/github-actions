@@ -1,0 +1,98 @@
+name: Packer - Format
+description: Check that Packer HCL templates are formatted with `packer fmt`. On failure, the diff is added to the job summary. Requires the `packer` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to check formatting in. Defaults to `./`."
+  recursive:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to also check subdirectories. Defaults to `true`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the unformatted lines in the pull request when `packer fmt` fails, from the hunks of the diff it printed. Defaults to `true`."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` holds no Packer HCL files and `packer fmt` was not run. Empty otherwise."
+  stdout:
+    value: ${{ steps.fmt.outputs.stdout }}
+    description: "The STDOUT stream of the call to `packer fmt`. Empty when skipped."
+  stderr:
+    value: ${{ steps.fmt.outputs.stderr }}
+    description: "The STDERR stream of the call to `packer fmt`. Empty when skipped."
+  exitcode:
+    value: ${{ steps.fmt.outputs.exitcode }}
+    description: "The exit code of the call to `packer fmt`. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      RECURSIVE: ${{ inputs.recursive }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      # `packer fmt` exits 0 on a directory without Packer HCL files, which would report a vacuous pass.
+      depth_args=()
+      [ "$RECURSIVE" = "true" ] || depth_args=(-maxdepth 1)
+      if [ -z "$(find "$target_dir" "${depth_args[@]}" -type f \( -name '*.pkr.hcl' -o -name '*.pkrvars.hcl' \) -print -quit)" ]; then
+        echo "::notice::Skipping packer fmt: no Packer HCL files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+      fi
+
+  - name: Check Packer Format
+    id: fmt
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      RECURSIVE: ${{ inputs.recursive }}
+    with:
+      run: |
+        args=(-check -diff)
+        if [ "$RECURSIVE" = "true" ]; then
+          args+=(-recursive)
+        fi
+
+        packer fmt "${args[@]}" "$TARGET_DIR"
+
+  # The diff already names each file (`+++ new/<file>`) and the first line of every hunk (`@@ -a,b +c,d @@`), so
+  # the annotations are read from the captured output. `packer fmt` prints the paths as given, relative to the
+  # repository.
+  - name: Annotate Findings
+    id: fmt-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.fmt.outcome == 'failure'
+    shell: bash
+    env:
+      LOG_FILE: ${{ steps.fmt.outputs.log_file }}
+    run: |
+      awk '
+        /^\+\+\+ new\// { file = substr($0, 9); next }
+        /^@@ / && file != "" {
+          line = $3; sub(/^\+/, "", line); sub(/,.*/, "", line)
+          printf "::error file=%s,line=%s,title=packer fmt · Not formatted::Run `packer fmt` to format this file.\n", file, line
+        }
+      ' "$LOG_FILE"
+
+  - name: Add Failure Details to Job Summary
+    id: fmt-summary
+    if: always() && steps.fmt.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer fmt · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.fmt.outputs.log_file }}
+      lang: diff

@@ -1,0 +1,139 @@
+name: Packer - Validate
+description: Install the required plugins of a Packer template directory with `packer init` and validate it with `packer validate`. On failure, the output is added to the job summary. Requires the `packer` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Packer template directory to initialize and validate. Defaults to `./`."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used by `packer init` to download plugins from GitHub without hitting the anonymous rate limit, exported as `PACKER_GITHUB_API_TOKEN`. Defaults to the automatically generated `github.token`."
+  syntax_only:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to check only the syntax of the templates with `packer validate -syntax-only`, leaving their configuration unverified. `packer init` is skipped as well, since a syntax-only check resolves no plugins, which is what makes this usable on a runner that cannot reach the plugin registry. Defaults to `false`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the failing lines in the pull request when `packer validate` fails, from the `Error:` and `on <file> line <n>` lines it printed. A diagnostic that names no file is annotated without a location rather than dropped. Defaults to `true`."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` holds no Packer template files and neither `packer init` nor `packer validate` was run. Empty otherwise."
+  # When `packer init` fails, `packer validate` does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stdout || steps.validate.outputs.stdout }}
+    description: "The STDOUT stream of the call to `packer validate`, or to `packer init` when it failed. Empty when skipped."
+  stderr:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stderr || steps.validate.outputs.stderr }}
+    description: "The STDERR stream of the call to `packer validate`, or to `packer init` when it failed. Empty when skipped."
+  exitcode:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.exitcode || steps.validate.outputs.exitcode }}
+    description: "The exit code of the call to `packer validate`, or to `packer init` when it failed. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      # `packer validate` fails on a directory without templates, which would report a failure for an empty target.
+      if [ -z "$(find "$target_dir" -maxdepth 1 -type f \( -name '*.pkr.hcl' -o -name '*.pkr.json' \) -print -quit)" ]; then
+        echo "::notice::Skipping packer validate: no Packer template files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
+      packer version
+
+  # `-syntax-only` resolves no plugins, so `packer init` is pointless there and would fail on a runner that
+  # cannot reach the plugin registry, which is one of the reasons to ask for a syntax-only check.
+  - name: Packer Init
+    id: init
+    if: steps.target.outputs.skipped != 'true' && inputs.syntax_only != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      PACKER_GITHUB_API_TOKEN: ${{ inputs.github_token }}
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+    with:
+      run: |
+        packer init "$TARGET_DIR"
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: always() && steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer init · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.init.outputs.log_file }}
+      lang: text
+
+  - name: Packer Validate
+    id: validate
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      SYNTAX_ONLY: ${{ inputs.syntax_only }}
+    with:
+      run: |
+        args=()
+        if [ "$SYNTAX_ONLY" = "true" ]; then
+          args+=(-syntax-only)
+        fi
+
+        packer validate "${args[@]}" "$TARGET_DIR"
+
+  # `-machine-readable` is not a better source here: it is the legacy stream format, which packs every diagnostic
+  # of the run into a single `ui,error` record as the same human-readable text with `\n` escaped and each comma
+  # replaced by `%!(PACKER_COMMA)`. It carries no file or line field, so the text output is parsed instead. Each
+  # diagnostic prints `Error: <summary>`, usually followed by `on <file> line <n>:` with the path as given,
+  # relative to the repository. Some, such as an unset variable, name no file and are annotated without one.
+  - name: Annotate Findings
+    id: validate-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.validate.outcome == 'failure'
+    shell: bash
+    env:
+      LOG_FILE: ${{ steps.validate.outputs.log_file }}
+    run: |
+      awk '
+        function escape(text) { gsub(/%/, "%25", text); return text }
+        # A diagnostic that reached the next one, or the end of the log, without naming a file still gets an
+        # annotation, just without a location.
+        function flush(  message) {
+          if (summary == "") { return }
+          message = escape(summary)
+          printf "::%s title=packer validate · %s::%s\n", severity, message, message
+          summary = ""
+        }
+        /^(Error|Warning): / { flush(); severity = tolower($1); sub(/:$/, "", severity); summary = substr($0, index($0, ": ") + 2); next }
+        /^[[:space:]]+on .+ line [0-9]+/ && summary != "" {
+          file = $2; line = $4; sub(/[:,].*$/, "", line)
+          message = escape(summary)
+          printf "::%s file=%s,line=%s,title=packer validate · %s::%s\n", severity, file, line, message, message
+          summary = ""
+        }
+        END { flush() }
+      ' "$LOG_FILE"
+
+  - name: Add Failure Details to Job Summary
+    id: validate-summary
+    if: always() && steps.validate.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer validate · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.validate.outputs.log_file }}
+      lang: text
