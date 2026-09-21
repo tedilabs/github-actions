@@ -155,7 +155,7 @@ runs:
 
       if [ "$total" -eq 0 ]; then
         failed=0
-        printf '## %s\n\nNo results were collected.\n' "$TITLE" > "$report"
+        printf '# %s\n\nNo results were collected.\n' "$TITLE" > "$report"
       else
         failed="$(jq -s 'map(select((.results | map(. == "failure") | any) or .job_status == "failure")) | length' "${files[@]}")"
         table="$(jq -s -r --arg label "$ID_LABEL" '
@@ -172,9 +172,9 @@ runs:
         ' "${files[@]}")"
 
         if [ "$failed" -eq 0 ]; then
-          footer="✅ All $total passed."
+          footer="> ✅ All $total passed."
         else
-          footer="❌ $failed of $total failed · see the [run summary]($RUN_URL) for details."
+          footer="> ❌ $failed of $total failed · see the [run summary]($RUN_URL) for details."
         fi
         # One collapsed section per target, headed by its name and its own one-line result, and left open
         # when it failed so a failure is read without a click.
@@ -185,11 +185,11 @@ runs:
             | (if $failed then "❌" else "✅" end) as $icon
             | (if $failed then " open" else "" end) as $open
             | (if (.headline // "") != "" then " &nbsp;<sub>\(.headline)</sub>" else "" end) as $note
-            | "<details\($open)>\n<summary><h3>\($icon) <code>\(.id)</code>\($note)</h3></summary>\n\n\(.details)\n\n</details>"
+            | "<details\($open)>\n<summary><h2>\($icon) <code>\(.id)</code>\($note)</h2></summary>\n\n\(.details)\n\n</details>"
           ] | join("\n\n---\n\n")
         ' "${files[@]}")"
 
-        printf '## %s\n\n' "$TITLE" > "$report"
+        printf '# %s\n\n' "$TITLE" > "$report"
         if [ "$TABLE_ENABLED" = "true" ]; then
           printf '%s\n\n' "$table" >> "$report"
         fi
@@ -209,7 +209,7 @@ runs:
         if [ "$total" -eq 0 ]; then
           cp "$report" "$comment"
         else
-          printf '## %s\n\n' "$TITLE" > "$comment"
+          printf '# %s\n\n' "$TITLE" > "$comment"
           if [ "$TABLE_ENABLED" = "true" ]; then
             printf '%s\n\n' "$table" >> "$comment"
           fi
