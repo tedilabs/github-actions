@@ -36,8 +36,10 @@ ACTIONS = [
     ("has moved to", "move"),
     ("will be imported", "import"),
 ]
-# The report puts each target under an `<h3>`, so a section inside one sits a level below it.
-HEADING = "####"
+# The report puts each target under an `<h2>`, so a section inside one sits a level below it.
+HEADING = "###"
+# Generous space around the divider, so the groups of the headline read apart at a glance.
+GROUP_DIVIDER = "&nbsp;&nbsp;·&nbsp;&nbsp;"
 RESOURCE_HEADER = re.compile(r"^  # (?P<address>\S.*?) (?P<phrase>will be .*|must be .*|has moved to .*)$")
 # A `  # (because ...)` line continues the header above it rather than starting a new resource.
 HEADER_NOTE = re.compile(r"^  # \((?P<note>.*)\)$")
@@ -125,13 +127,17 @@ def drift_diff(change: dict) -> list[str]:
     return lines or ["  # no attribute difference was reported"]
 
 
-def file_link(prefix: str, target_dir: str, filename: str, line: int) -> str:
+def diagnostic_row(prefix: str, target_dir: str, filename: str, line: int, message: str) -> str:
+    """One row per diagnostic, reading location first, with the whole row as the link."""
+    if not filename:
+        return f"- {message}"
     label = f"`{filename}:{line}`" if line else f"`{filename}`"
-    if not prefix or not filename:
-        return label
+    text = f"{label} — {message}"
+    if not prefix:
+        return f"- {text}"
     path = filename if target_dir in ("", ".") else f"{target_dir}/{filename}"
     anchor = f"#L{line}" if line else ""
-    return f"[{label}]({prefix}{path}{anchor})"
+    return f"- [{text}]({prefix}{path}{anchor})"
 
 
 def main() -> int:
@@ -222,7 +228,7 @@ def main() -> int:
             notices.append(f"⚠️ {plural(len(warnings), 'warning')}")
         if notices:
             groups.append(" ".join(notices))
-        print(" &nbsp;│&nbsp; ".join(groups))
+        print(GROUP_DIVIDER.join(groups))
         return 0
 
     out: list[str] = []
@@ -278,14 +284,15 @@ def main() -> int:
         out.extend(["", f"{HEADING} {heading}", ""])
         for item in found[: args.max_resources]:
             rng = item.get("range") or {}
-            link = file_link(
-                args.file_url_prefix,
-                args.target_dir,
-                rng.get("filename", ""),
-                (rng.get("start") or {}).get("line", 0),
+            out.append(
+                diagnostic_row(
+                    args.file_url_prefix,
+                    args.target_dir,
+                    rng.get("filename", ""),
+                    (rng.get("start") or {}).get("line", 0),
+                    item.get("summary", ""),
+                )
             )
-            suffix = f" · {link}" if rng.get("filename") else ""
-            out.append(f"- **{item.get('summary', '')}**{suffix}")
 
     summary = "\n".join(out).strip()
 
