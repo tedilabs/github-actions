@@ -114,9 +114,13 @@ jobs:
 
         echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
 
+    # Only `packer` is installed, so a repository that pins other tools in its mise config does not pay to
+    # install them on every leg of the matrix. Both checks need it, so it is not tied to either toggle.
     - name: Set up tools
       id: setup-tools
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        install_args: packer
 
     - name: Check Format
       id: fmt
