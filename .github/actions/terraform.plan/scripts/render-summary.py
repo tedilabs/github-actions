@@ -14,14 +14,27 @@ import re
 import sys
 
 # The phrase Terraform puts after the address in `  # <address> <phrase>`, and how to show it.
+# Terraform's own notation, coloured so a block can be placed at a glance.
+SIGNS = {
+    "create": "🟩 <code>+</code>",
+    "update": "🟨 <code>~</code>",
+    "destroy": "🟥 <code>-</code>",
+    "replace": "🟧 <code>±</code>",
+    "read": "🟦 <code>&lt;=</code>",
+    "move": "🟪 <code>-&gt;</code>",
+    "import": "🟦 <code>+</code>",
+    "drift": "🟪 <code>~</code>",
+    "change": "⬜ <code>?</code>",
+}
+COUNT_SIGNS = {"create": "🟩 +", "update": "🟨 ~", "destroy": "🟥 -", "replace": "🟧 ±"}
 ACTIONS = [
-    ("will be created", "➕", "create"),
-    ("will be updated in-place", "📝", "update"),
-    ("must be replaced", "♻️", "replace"),
-    ("will be destroyed", "🗑️", "destroy"),
-    ("will be read during apply", "👁️", "read"),
-    ("has moved to", "📦", "move"),
-    ("will be imported", "📥", "import"),
+    ("will be created", "create"),
+    ("will be updated in-place", "update"),
+    ("must be replaced", "replace"),
+    ("will be destroyed", "destroy"),
+    ("will be read during apply", "read"),
+    ("has moved to", "move"),
+    ("will be imported", "import"),
 ]
 RESOURCE_HEADER = re.compile(r"^  # (?P<address>\S.*?) (?P<phrase>will be .*|must be .*|has moved to .*)$")
 # A `  # (because ...)` line continues the header above it rather than starting a new resource.
@@ -35,15 +48,15 @@ def slice_resources(text: str) -> list[dict]:
     for line in text.splitlines():
         header = RESOURCE_HEADER.match(line)
         if header:
-            emoji, action = "🔹", "change"
-            for phrase, phrase_emoji, phrase_action in ACTIONS:
+            action = "change"
+            for phrase, phrase_action in ACTIONS:
                 if header.group("phrase").startswith(phrase):
-                    emoji, action = phrase_emoji, phrase_action
+                    action = phrase_action
                     break
             current = {
                 "address": header.group("address"),
                 "phrase": header.group("phrase"),
-                "emoji": emoji,
+                "sign": SIGNS.get(action, SIGNS["change"]),
                 "action": action,
                 "note": "",
                 "lines": [],
@@ -131,6 +144,7 @@ def main() -> int:
     parser.add_argument("--diff", default="true")
     parser.add_argument("--max-bytes", type=int, default=30000)
     parser.add_argument("--failed", default="false")
+    parser.add_argument("--part", choices=("body", "headline"), default="body")
     args = parser.parse_args()
 
     show_diff = args.diff == "true"
@@ -181,61 +195,78 @@ def main() -> int:
             counts["replace"] += 1
     drift = plan.get("resource_drift", [])
 
-    out: list[str] = []
     failed = args.failed == "true"
+    errors = [item for item in diagnostics if item.get("severity") == "error"]
+    warnings = [item for item in diagnostics if item.get("severity") == "warning"]
+
+    def plural(count: int, noun: str) -> str:
+        return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+    # The headline sits next to the target's name in the report, so it stays to a single line.
+    if args.part == "headline":
+        parts: list[str] = []
+        if not failed:
+            if changes:
+                parts += [f"{COUNT_SIGNS[key]}{counts[key]}" for key in COUNT_SIGNS if counts[key]]
+            else:
+                parts.append("no changes")
+        if drift:
+            parts.append(f"🟪 {plural(len(drift), 'drifted')}")
+        if errors:
+            parts.append(f"❌ {plural(len(errors), 'error')}")
+        if warnings:
+            parts.append(f"⚠️ {plural(len(warnings), 'warning')}")
+        print(" · ".join(parts))
+        return 0
+
+    out: list[str] = []
 
     if failed:
         # The diagnostics below say what went wrong, so the plan itself is not described.
         out.extend(["> [!CAUTION]", "> `terraform plan` failed."])
     elif not changes:
         out.append("No changes. The infrastructure matches the configuration.")
-
-    if not failed and changes:
-        out.append(
-            f"**{counts['create']}** to add · **{counts['update']}** to change · "
-            f"**{counts['destroy']}** to destroy · **{counts['replace']}** to replace"
-        )
-        out.append("")
-
+    else:
         sliced = slice_resources(plan_text) if show_diff else []
         by_address = {item["address"]: item for item in sliced}
-        emoji_by_action = {"create": "➕", "update": "📝", "delete": "🗑️", "replace": "♻️"}
 
         for change in changes[: args.max_resources]:
             address = change.get("address", "")
             actions = change.get("change", {}).get("actions", [])
-            action = "replace" if set(actions) == {"create", "delete"} else (actions[0] if actions else "change")
+            if set(actions) == {"create", "delete"}:
+                action = "replace"
+            elif actions == ["delete"]:
+                action = "destroy"
+            else:
+                action = actions[0] if actions else "change"
             item = by_address.get(address)
-            emoji = item["emoji"] if item else emoji_by_action.get(action, "🔹")
+            sign = item["sign"] if item else SIGNS.get(action, SIGNS["change"])
             reason = (item or {}).get("note") or change.get("action_reason", "").replace("_", " ")
-            title = f"{emoji} <code>{address}</code>"
+            title = f"{sign} <code>{address}</code>"
             if reason:
                 title += f" — {reason}"
 
             if item and item["lines"]:
                 out.extend(details(title, fence(item["lines"], args.diff_max_lines)))
             else:
-                out.append(f"- {emoji} `{address}`" + (f" — {reason}" if reason else ""))
+                out.append(f"- {sign} <code>{address}</code>" + (f" — {reason}" if reason else ""))
         if len(changes) > args.max_resources:
             out.extend(["", f"… and {len(changes) - args.max_resources} more resource(s); see the job log."])
 
     if drift:
-        noun = "resource" if len(drift) == 1 else "resources"
-        out.extend(["", f"**⚠️ {len(drift)} {noun} changed outside of Terraform**", ""])
+        out.extend(["", f"**🟪 {plural(len(drift), 'resource')} changed outside of Terraform**", ""])
         for item in drift[: args.max_resources]:
             address = item.get("address", "")
             body = fence(drift_diff(item.get("change", {})), args.diff_max_lines) if show_diff else []
-            title = f"🌀 <code>{address}</code>"
-            out.extend(details(title, body) if body else [f"- 🌀 `{address}`"])
+            title = f"{SIGNS['drift']} <code>{address}</code>"
+            out.extend(details(title, body) if body else [f"- {title}"])
         if len(drift) > args.max_resources:
             out.extend(["", f"… and {len(drift) - args.max_resources} more; see the job log."])
 
-    for severity, emoji, noun in (("error", "❌", "error"), ("warning", "⚠️", "warning")):
-        found = [item for item in diagnostics if item.get("severity") == severity]
+    for found, emoji, noun in ((errors, "❌", "error"), (warnings, "⚠️", "warning")):
         if not found:
             continue
-        label = noun if len(found) == 1 else f"{noun}s"
-        out.extend(["", f"**{emoji} {len(found)} {label}**", ""])
+        out.extend(["", f"**{emoji} {plural(len(found), noun)}**", ""])
         for item in found[: args.max_resources]:
             rng = item.get("range") or {}
             link = file_link(
