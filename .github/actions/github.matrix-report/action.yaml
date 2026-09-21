@@ -136,6 +136,7 @@ runs:
       ID_LABEL: ${{ inputs.id_label }}
       TITLE: ${{ inputs.title }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      MAX_COMMENT_BYTES: "60000"
     run: |
       dir="$RUNNER_TEMP/matrix-report"
       shopt -s nullglob
@@ -166,23 +167,38 @@ runs:
         else
           footer="❌ $failed of $total failed · see the [run summary]($RUN_URL) for details."
         fi
-        # A collapsed block per row keeps a long body, such as a plan, out of the way until it is wanted.
+        # One section per row, so a long body such as a plan is read under the heading of the target it
+        # belongs to rather than as one undifferentiated block.
         details="$(jq -s -r '
           sort_by(.id)[]
           | select((.details // "") != "")
-          | "<details><summary>\(.id)</summary>\n\n\(.details)\n\n</details>\n"
+          | "#### \(.id)\n\n\(.details)\n"
         ' "${files[@]}")"
 
         printf '### %s\n\n%s\n\n%s\n' "$TITLE" "$table" "$footer" > "$report"
         if [ -n "$details" ]; then
-          printf '\n%s\n' "$details" >> "$report"
+          printf '\n---\n\n%s\n' "$details" >> "$report"
         fi
       fi
 
       cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      # The job summary takes the whole report, but a pull request comment is capped at 65,536
+      # characters, so the comment keeps the table and points at the run for the rest.
+      comment="$report"
+      if [ "$(wc -c < "$report")" -gt "$MAX_COMMENT_BYTES" ]; then
+        comment="$RUNNER_TEMP/matrix-report-comment.md"
+        if [ "$total" -eq 0 ]; then
+          cp "$report" "$comment"
+        else
+          printf '### %s\n\n%s\n\n%s\n\n> [!NOTE]\n> The per-target details were too long for a comment. See the [run summary](%s).\n' \
+            "$TITLE" "$table" "$footer" "$RUN_URL" > "$comment"
+        fi
+      fi
+
       {
         echo "report<<MATRIX_REPORT_EOF"
-        cat "$report"
+        cat "$comment"
         echo "MATRIX_REPORT_EOF"
         echo "total=$total"
         echo "failed=$failed"
