@@ -18,7 +18,10 @@ inputs:
     description: "(Required in `collect` mode) A JSON object mapping each check name to its step outcome, e.g. `{\"fmt\": \"success\", \"tflint\": \"failure\"}`. Key order defines the column order. Values are usually `steps.<id>.outcome`: `success`, `failure`, `skipped`, or `cancelled`. An empty value drops the check from the row, so a check that is turned off for the whole workflow leaves no column behind."
   details:
     required: false
-    description: "(Optional, `collect` mode) Markdown shown for this row in a collapsed `<details>` block below the table, for content too long to sit in a cell such as a Terraform plan. Rows without it are listed in the table only."
+    description: "(Optional, `collect` mode) Markdown shown for this target in its own collapsed section, for content too long to sit in a cell such as a Terraform plan. Targets without it are listed in the table only."
+  headline:
+    required: false
+    description: "(Optional, `collect` mode) A single line shown next to the target's name on the section heading, such as the counts of a plan. Only used when `details` is set."
   job_status:
     required: false
     description: "(Optional, `collect` mode) The current job status, usually the `job.status` context. When it is `failure` while no check failed (e.g. a setup step failed), the row is flagged as failed."
@@ -38,6 +41,10 @@ inputs:
     required: false
     default: "true"
     description: "(Optional, `publish` mode) Whether to post the report as a sticky comment on the pull request. Only applies to `pull_request` events and requires the `pull-requests: write` permission. Defaults to `true`."
+  table_enabled:
+    required: false
+    default: "true"
+    description: "(Optional, `publish` mode) Whether the report opens with the table of every target and check. Worth turning off for a report of a single check whose targets each carry `details`, where the table only repeats the section headings. Defaults to `true`."
   pr_number:
     required: false
     description: "(Optional, `publish` mode) The pull request to comment on. Required on events without a pull request context, such as the push that follows a merge. Defaults to the pull request of the current event."
@@ -75,6 +82,7 @@ runs:
       ID: ${{ inputs.id }}
       RESULTS: ${{ inputs.results }}
       DETAILS: ${{ inputs.details }}
+      HEADLINE: ${{ inputs.headline }}
       JOB_STATUS: ${{ inputs.job_status }}
     run: |
       if [ -z "$ID" ] || ! jq -e 'type == "object" and length > 0' <<< "$RESULTS" >/dev/null 2>&1; then
@@ -89,8 +97,8 @@ runs:
       key="$(printf '%s' "$ID" | tr -c 'A-Za-z0-9._-' '-')-$(printf '%s' "$ID" | shasum | cut -c1-8)"
       dir="$RUNNER_TEMP/matrix-report"
       mkdir -p "$dir"
-      jq -n --arg id "$ID" --arg job_status "$JOB_STATUS" --argjson results "$results" --arg details "$DETAILS" \
-        '{id: $id, job_status: $job_status, results: $results, details: $details}' > "$dir/$key.json"
+      jq -n --arg id "$ID" --arg job_status "$JOB_STATUS" --argjson results "$results" --arg details "$DETAILS" --arg headline "$HEADLINE" \
+        '{id: $id, job_status: $job_status, results: $results, details: $details, headline: $headline}' > "$dir/$key.json"
 
       echo "key=$key" >> "$GITHUB_OUTPUT"
 
@@ -135,6 +143,7 @@ runs:
     env:
       ID_LABEL: ${{ inputs.id_label }}
       TITLE: ${{ inputs.title }}
+      TABLE_ENABLED: ${{ inputs.table_enabled }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       MAX_COMMENT_BYTES: "60000"
     run: |
@@ -167,17 +176,26 @@ runs:
         else
           footer="❌ $failed of $total failed · see the [run summary]($RUN_URL) for details."
         fi
-        # One section per row, so a long body such as a plan is read under the heading of the target it
-        # belongs to rather than as one undifferentiated block.
+        # One collapsed section per target, headed by its name and its own one-line result, and left open
+        # when it failed so a failure is read without a click.
         details="$(jq -s -r '
-          sort_by(.id)[]
-          | select((.details // "") != "")
-          | "#### \(.id)\n\n\(.details)\n"
+          [ sort_by(.id)[]
+            | select((.details // "") != "")
+            | (((.results | map(. == "failure") | any)) or .job_status == "failure") as $failed
+            | (if $failed then "❌" else "✅" end) as $icon
+            | (if $failed then " open" else "" end) as $open
+            | (if (.headline // "") != "" then " &nbsp;<sub>\(.headline)</sub>" else "" end) as $note
+            | "<details\($open)>\n<summary><h3>\($icon) <code>\(.id)</code>\($note)</h3></summary>\n\n\(.details)\n\n</details>"
+          ] | join("\n\n---\n\n")
         ' "${files[@]}")"
 
-        printf '### %s\n\n%s\n\n%s\n' "$TITLE" "$table" "$footer" > "$report"
+        printf '### %s\n\n' "$TITLE" > "$report"
+        if [ "$TABLE_ENABLED" = "true" ]; then
+          printf '%s\n\n' "$table" >> "$report"
+        fi
+        printf '%s\n' "$footer" >> "$report"
         if [ -n "$details" ]; then
-          printf '\n---\n\n%s\n' "$details" >> "$report"
+          printf '\n%s\n' "$details" >> "$report"
         fi
       fi
 
@@ -191,8 +209,12 @@ runs:
         if [ "$total" -eq 0 ]; then
           cp "$report" "$comment"
         else
-          printf '### %s\n\n%s\n\n%s\n\n> [!NOTE]\n> The per-target details were too long for a comment. See the [run summary](%s).\n' \
-            "$TITLE" "$table" "$footer" "$RUN_URL" > "$comment"
+          printf '### %s\n\n' "$TITLE" > "$comment"
+          if [ "$TABLE_ENABLED" = "true" ]; then
+            printf '%s\n\n' "$table" >> "$comment"
+          fi
+          printf '%s\n\n> [!NOTE]\n> The per-target details were too long for a comment. See the [run summary](%s).\n' \
+            "$footer" "$RUN_URL" >> "$comment"
         fi
       fi
 
