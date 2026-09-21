@@ -89,6 +89,9 @@ outputs:
     value: ${{ steps.plan.outputs.diagnostics }}
     description: "A JSON array of the diagnostics, each `{severity, summary, filename, line}`, truncated to `max_resources`. Read it with `fromJson`."
 
+  headline:
+    value: ${{ steps.summary.outputs.headline }}
+    description: "A single line describing the plan, such as `🟩 +1 · 🟨 ~1 · 🟪 1 drifted`, meant to sit next to the workspace name in a report rather than above the body."
   summary:
     value: ${{ steps.summary.outputs.summary }}
     description: "A Markdown summary, suitable for a job summary or a pull request comment. It describes the plan when there is one, and otherwise carries the tail of whichever command failed, so a reader never sees a bare failure with no reason."
@@ -125,6 +128,7 @@ runs:
         echo "plan_json_file=$prefix.json"
         echo "log_file=$prefix.log"
         echo "summary_file=$prefix.md"
+        echo "headline_file=$prefix.headline"
       } >> "$GITHUB_OUTPUT"
 
   - name: Terraform Init
@@ -161,6 +165,7 @@ runs:
       PLAN_JSON_FILE: ${{ steps.target.outputs.plan_json_file }}
       LOG_FILE: ${{ steps.target.outputs.log_file }}
       SUMMARY_FILE: ${{ steps.target.outputs.summary_file }}
+      HEADLINE_FILE: ${{ steps.target.outputs.headline_file }}
       ARGS: ${{ inputs.args }}
       MAX_RESOURCES: ${{ inputs.max_resources }}
       FILE_URL_PREFIX: ${{ steps.target.outputs.file_url_prefix }}
@@ -262,6 +267,7 @@ runs:
       # rather than as a bare excerpt of the log.
       render() {
         python3 "$RENDER_SCRIPT" \
+          --part "$2" \
           --plan-json "$plan_json" \
           --plan-text "$log" \
           --stream "$stream" \
@@ -275,7 +281,8 @@ runs:
       }
 
       if [ "$exit_code" -eq 1 ]; then
-        render true > "$SUMMARY_FILE" || rm -f "$SUMMARY_FILE"
+        render true body > "$SUMMARY_FILE" || rm -f "$SUMMARY_FILE"
+        render true headline > "$HEADLINE_FILE" || rm -f "$HEADLINE_FILE"
         echo "::error::terraform plan failed."
         exit 1
       fi
@@ -322,7 +329,8 @@ runs:
         # rather than rendering an empty table that would read as "no changes".
         summary="> [!WARNING]"$'\n'"> This workspace runs with remote execution, so no plan file was saved."$'\n'"> The plan output is in the job log, and this workspace cannot be applied from a saved plan."
       else
-        summary="$(render false)"
+        summary="$(render false body)"
+        render false headline > "$HEADLINE_FILE"
       fi
 
       # Written to a file rather than an output, so the always-running summary step below can
@@ -375,6 +383,7 @@ runs:
       INIT_LOG: ${{ steps.init.outputs.log_file }}
       LOG_FILE: ${{ steps.target.outputs.log_file }}
       SUMMARY_FILE: ${{ steps.target.outputs.summary_file }}
+      HEADLINE_FILE: ${{ steps.target.outputs.headline_file }}
     run: |
       excerpt() {
         printf '```text\n%s\n```\n' "$(tail -n "$MAX_LOG_LINES" "$1")"
@@ -390,7 +399,13 @@ runs:
         summary="> [!CAUTION]"$'\n'"> The plan did not run. See the job log."
       fi
 
+      headline=""
+      if [ -n "$HEADLINE_FILE" ] && [ -f "$HEADLINE_FILE" ]; then
+        headline="$(head -n 1 "$HEADLINE_FILE")"
+      fi
+
       {
+        echo "headline=$headline"
         echo "summary<<TERRAFORM_PLAN_EOF"
         echo "$summary"
         echo "TERRAFORM_PLAN_EOF"
