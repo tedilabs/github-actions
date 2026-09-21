@@ -14,19 +14,21 @@ import re
 import sys
 
 # The phrase Terraform puts after the address in `  # <address> <phrase>`, and how to show it.
-# Terraform's own notation, coloured so a block can be placed at a glance.
+# Terraform's own notation, coloured so a block can be placed at a glance. Drift is deliberately not a
+# circle: it is not a change Terraform planned, so it reads as a different kind of thing.
 SIGNS = {
-    "create": "🟩 <code>+</code>",
-    "update": "🟨 <code>~</code>",
-    "destroy": "🟥 <code>-</code>",
-    "replace": "🟧 <code>±</code>",
-    "read": "🟦 <code>&lt;=</code>",
-    "move": "🟪 <code>-&gt;</code>",
-    "import": "🟦 <code>+</code>",
-    "drift": "🟪 <code>~</code>",
-    "change": "⬜ <code>?</code>",
+    "create": "🟢 <code>+</code>",
+    "update": "🟡 <code>~</code>",
+    "destroy": "🔴 <code>-</code>",
+    "replace": "🟠 <code>±</code>",
+    "read": "🔵 <code>&lt;=</code>",
+    "move": "🟣 <code>-&gt;</code>",
+    "import": "🔵 <code>+</code>",
+    "drift": "🌀 <code>~</code>",
+    "change": "⚪ <code>?</code>",
 }
-COUNT_SIGNS = {"create": "🟩 +", "update": "🟨 ~", "destroy": "🟥 -", "replace": "🟧 ±"}
+COUNT_SIGNS = {"create": "🟢 +", "update": "🟡 ~", "destroy": "🔴 -", "replace": "🟠 ±"}
+DRIFT_SIGN = "🌀"
 ACTIONS = [
     ("will be created", "create"),
     ("will be updated in-place", "update"),
@@ -220,7 +222,7 @@ def main() -> int:
             else:
                 groups.append("no changes")
         if drift:
-            groups.append(f"🟪 {plural(len(drift), 'drifted')}")
+            groups.append(f"{DRIFT_SIGN} {plural(len(drift), 'drifted')}")
         notices = []
         if errors:
             notices.append(f"❌ {plural(len(errors), 'error')}")
