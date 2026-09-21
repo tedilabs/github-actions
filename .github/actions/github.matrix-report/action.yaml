@@ -155,7 +155,7 @@ runs:
 
       if [ "$total" -eq 0 ]; then
         failed=0
-        printf '### %s\n\nNo results were collected.\n' "$TITLE" > "$report"
+        printf '## %s\n\nNo results were collected.\n' "$TITLE" > "$report"
       else
         failed="$(jq -s 'map(select((.results | map(. == "failure") | any) or .job_status == "failure")) | length' "${files[@]}")"
         table="$(jq -s -r --arg label "$ID_LABEL" '
@@ -189,7 +189,7 @@ runs:
           ] | join("\n\n---\n\n")
         ' "${files[@]}")"
 
-        printf '### %s\n\n' "$TITLE" > "$report"
+        printf '## %s\n\n' "$TITLE" > "$report"
         if [ "$TABLE_ENABLED" = "true" ]; then
           printf '%s\n\n' "$table" >> "$report"
         fi
@@ -209,7 +209,7 @@ runs:
         if [ "$total" -eq 0 ]; then
           cp "$report" "$comment"
         else
-          printf '### %s\n\n' "$TITLE" > "$comment"
+          printf '## %s\n\n' "$TITLE" > "$comment"
           if [ "$TABLE_ENABLED" = "true" ]; then
             printf '%s\n\n' "$table" >> "$comment"
           fi
