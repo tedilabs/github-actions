@@ -36,6 +36,8 @@ ACTIONS = [
     ("has moved to", "move"),
     ("will be imported", "import"),
 ]
+# The report puts each target under an `<h3>`, so a section inside one sits a level below it.
+HEADING = "####"
 RESOURCE_HEADER = re.compile(r"^  # (?P<address>\S.*?) (?P<phrase>will be .*|must be .*|has moved to .*)$")
 # A `  # (because ...)` line continues the header above it rather than starting a new resource.
 HEADER_NOTE = re.compile(r"^  # \((?P<note>.*)\)$")
@@ -204,29 +206,35 @@ def main() -> int:
 
     # The headline sits next to the target's name in the report, so it stays to a single line.
     if args.part == "headline":
-        parts: list[str] = []
+        # Each group is one concern, so they are divided rather than run together.
+        groups: list[str] = []
         if not failed:
             if changes:
-                parts += [f"{COUNT_SIGNS[key]}{counts[key]}" for key in COUNT_SIGNS if counts[key]]
+                groups.append(" ".join(f"{COUNT_SIGNS[key]}{counts[key]}" for key in COUNT_SIGNS if counts[key]))
             else:
-                parts.append("no changes")
+                groups.append("no changes")
         if drift:
-            parts.append(f"🟪 {plural(len(drift), 'drifted')}")
+            groups.append(f"🟪 {plural(len(drift), 'drifted')}")
+        notices = []
         if errors:
-            parts.append(f"❌ {plural(len(errors), 'error')}")
+            notices.append(f"❌ {plural(len(errors), 'error')}")
         if warnings:
-            parts.append(f"⚠️ {plural(len(warnings), 'warning')}")
-        print(" · ".join(parts))
+            notices.append(f"⚠️ {plural(len(warnings), 'warning')}")
+        if notices:
+            groups.append(" ".join(notices))
+        print(" &nbsp;│&nbsp; ".join(groups))
         return 0
 
     out: list[str] = []
 
     if failed:
-        # The diagnostics below say what went wrong, so the plan itself is not described.
-        out.extend(["> [!CAUTION]", "> `terraform plan` failed."])
+        # The heading already carries ❌ and the error count, so there is no banner to repeat it.
+        if not errors and not warnings:
+            out.append("The plan failed and reported no diagnostics. See the job log.")
     elif not changes:
         out.append("No changes. The infrastructure matches the configuration.")
     else:
+        out.extend([f"{HEADING} Resource changes", ""])
         sliced = slice_resources(plan_text) if show_diff else []
         by_address = {item["address"]: item for item in sliced}
 
@@ -254,7 +262,7 @@ def main() -> int:
             out.extend(["", f"… and {len(changes) - args.max_resources} more resource(s); see the job log."])
 
     if drift:
-        out.extend(["", f"**🟪 {plural(len(drift), 'resource')} changed outside of Terraform**", ""])
+        out.extend(["", f"{HEADING} Changed outside of Terraform", ""])
         for item in drift[: args.max_resources]:
             address = item.get("address", "")
             body = fence(drift_diff(item.get("change", {})), args.diff_max_lines) if show_diff else []
@@ -263,10 +271,11 @@ def main() -> int:
         if len(drift) > args.max_resources:
             out.extend(["", f"… and {len(drift) - args.max_resources} more; see the job log."])
 
-    for found, emoji, noun in ((errors, "❌", "error"), (warnings, "⚠️", "warning")):
+    for found, heading in ((errors, "Errors"), (warnings, "Warnings")):
         if not found:
             continue
-        out.extend(["", f"**{emoji} {plural(len(found), noun)}**", ""])
+        # The count is on the workspace heading already, so the section only needs a name.
+        out.extend(["", f"{HEADING} {heading}", ""])
         for item in found[: args.max_resources]:
             rng = item.get("range") or {}
             link = file_link(
