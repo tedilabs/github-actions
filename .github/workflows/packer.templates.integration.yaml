@@ -26,11 +26,6 @@ on:
         default: "2"
         description: "(Optional) The maximum depth of the changed directories to check. For example, `builds/foo/source.pkr.hcl` with a max depth of `2` is checked as `builds/foo`. Defaults to `2`."
 
-      packer_version:
-        type: string
-        required: false
-        default: latest
-        description: "(Optional) The version of `packer` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. Defaults to `latest`."
       aws_region:
         type: string
         required: false
@@ -99,27 +94,15 @@ jobs:
       id: checkout
       uses: actions/checkout@v7
 
-    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
-    # still take precedence while a self-hosted runner's real global config is left untouched.
-    - name: Set Default Tool Versions
-      id: default-tools
-      env:
-        PACKER_VERSION: ${{ inputs.packer_version }}
-      run: |
-        config_file="$RUNNER_TEMP/mise-defaults.toml"
-        cat > "$config_file" <<TOML
-        [tools]
-        packer = "$PACKER_VERSION"
-        TOML
-
-        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
-
-    # Only `packer` is installed, so a repository that pins other tools in its mise config does not pay to
-    # install them on every leg of the matrix. Both checks need it, so it is not tied to either toggle.
+    # The tools and their versions come from the repository's mise config (`mise.toml` or `.tool-versions`).
+    # The build directory is passed so a `mise.toml` placed there overrides the repository-wide one,
+    # and only `packer` is installed, so a repository that pins other tools does not pay to install them on
+    # every leg of the matrix. Both checks need it, so it is not tied to either toggle.
     - name: Set up tools
       id: setup-tools
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
       with:
+        working_directory: ${{ matrix.path }}
         install_args: packer
 
     - name: Check Format
