@@ -24,6 +24,18 @@ inputs:
     required: false
     default: "true"
     description: "(Optional) Whether to annotate the reported lines in the pull request, from the diagnostics of the plan. Warnings are annotated even when the plan succeeds. Defaults to `true`."
+  diff_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether the summary shows the attribute diff of each changed resource in a collapsed block. The diff is sliced out of `terraform show`, so values marked `sensitive` stay redacted, but every other attribute value becomes visible wherever the summary is published. Set to `false` to list the addresses only. Defaults to `true`."
+  diff_max_lines:
+    required: false
+    default: "60"
+    description: "(Optional) The maximum number of diff lines shown per resource before the block is truncated. Defaults to `60`."
+  summary_max_bytes:
+    required: false
+    default: "30000"
+    description: "(Optional) The maximum size of the rendered summary. One workspace has to stay well inside the 65,536 character limit of a pull request comment, which the report shares with every other workspace. Defaults to `30000`."
 
 outputs:
   has_changes:
@@ -92,6 +104,7 @@ runs:
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
       PLAN_FILE: ${{ inputs.plan_file }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     run: |
       target_dir="${TARGET_DIR%/}"
       target_dir="${target_dir:-.}"
@@ -100,8 +113,13 @@ runs:
       # the plan file, log or summary the first one left behind.
       prefix="$RUNNER_TEMP/terraform-plan-$(head -c 15 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
 
+      # Diagnostics point at a file and a line, so link them to the blob on the commit being planned.
+      # On a pull request `github.sha` is the merge commit, whose tree is not what the author sees.
+      sha="${HEAD_SHA:-$GITHUB_SHA}"
+
       {
         echo "target_dir=$target_dir"
+        echo "file_url_prefix=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$sha/"
         echo "plan_file=${PLAN_FILE:-$prefix.tfplan}"
         echo "stream_file=$prefix.ndjson"
         echo "plan_json_file=$prefix.json"
@@ -145,6 +163,11 @@ runs:
       SUMMARY_FILE: ${{ steps.target.outputs.summary_file }}
       ARGS: ${{ inputs.args }}
       MAX_RESOURCES: ${{ inputs.max_resources }}
+      FILE_URL_PREFIX: ${{ steps.target.outputs.file_url_prefix }}
+      DIFF_ENABLED: ${{ inputs.diff_enabled }}
+      DIFF_MAX_LINES: ${{ inputs.diff_max_lines }}
+      SUMMARY_MAX_BYTES: ${{ inputs.summary_max_bytes }}
+      RENDER_SCRIPT: ${{ github.action_path }}/scripts/render-summary.py
     run: |
       if [ -n "$WORKSPACE" ]; then
         export TF_WORKSPACE="$WORKSPACE"
@@ -235,7 +258,24 @@ runs:
         echo "diagnostics=$diagnostics_json"
       } >> "$GITHUB_OUTPUT"
 
+      # The summary is rendered even for a failed plan, so its diagnostics reach the report as links
+      # rather than as a bare excerpt of the log.
+      render() {
+        python3 "$RENDER_SCRIPT" \
+          --plan-json "$plan_json" \
+          --plan-text "$log" \
+          --stream "$stream" \
+          --target-dir "$TARGET_DIR" \
+          --file-url-prefix "$FILE_URL_PREFIX" \
+          --max-resources "$MAX_RESOURCES" \
+          --diff-max-lines "$DIFF_MAX_LINES" \
+          --max-bytes "$SUMMARY_MAX_BYTES" \
+          --diff "$DIFF_ENABLED" \
+          --failed "$1"
+      }
+
       if [ "$exit_code" -eq 1 ]; then
+        render true > "$SUMMARY_FILE" || rm -f "$SUMMARY_FILE"
         echo "::error::terraform plan failed."
         exit 1
       fi
@@ -282,48 +322,7 @@ runs:
         # rather than rendering an empty table that would read as "no changes".
         summary="> [!WARNING]"$'\n'"> This workspace runs with remote execution, so no plan file was saved."$'\n'"> The plan output is in the job log, and this workspace cannot be applied from a saved plan."
       else
-      summary="$(jq -r --argjson counts "$resource_counts" --argjson max "$MAX_RESOURCES" --arg saved "$plan_file_saved" '
-        def symbol:
-          if   . == ["create"] then "+"
-          elif . == ["update"] then "~"
-          elif . == ["delete"] then "-"
-          elif . == ["delete","create"] or . == ["create","delete"] then "±"
-          else "?" end;
-        [(.resource_changes // [])[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $rows
-        | [(.resource_drift // [])[]] as $drift
-        | (if ($rows | length) == 0 then
-            ["No changes. The infrastructure matches the configuration."]
-          else
-            ["**\($counts.create)** to add, **\($counts.update)** to change, **\($counts.destroy)** to destroy, **\($counts.replace)** to replace.",
-             "",
-             "| | Resource |",
-             "|:-:|---|"]
-            + [$rows[0:$max][] | "| `\(.change.actions | symbol)` | `\(.address)` |"]
-            + (if ($rows | length) > $max then ["", "… and \(($rows | length) - $max) more."] else [] end)
-          end)
-          + (if ($drift | length) > 0 then
-              ["", "<details><summary>⚠️ \($drift | length) changed outside of Terraform</summary>", ""]
-              + [$drift[0:$max][] | "- `\(.address)`"]
-              + ["", "</details>"]
-            else [] end)
-          + (if $saved == "false" then ["", "> [!WARNING]", "> This workspace runs remotely, so no plan file was saved and it cannot be applied from one."] else [] end)
-        | join("\n")
-      ' "$plan_json")"
-      fi
-
-      # Diagnostics are not in the plan file, so they are appended from the stream.
-      warnings="$(jq -s -r --argjson max "$MAX_RESOURCES" '
-        [ .[] | select(.type == "diagnostic") | .diagnostic | select(.severity == "warning") ] as $w
-        | if ($w | length) == 0 then empty
-          else
-            ["", "<details><summary>⚠️ \($w | length) warning(s)</summary>", ""]
-            + [$w[0:$max][] | "- **\(.summary)**" + (if (.range.filename // "") != "" then " · `\(.range.filename):\(.range.start.line)`" else "" end)]
-            + ["", "</details>"]
-            | join("\n")
-          end
-      ' "$stream" 2>/dev/null || true)"
-      if [ -n "$warnings" ]; then
-        summary="$summary$warnings"
+        summary="$(render false)"
       fi
 
       # Written to a file rather than an output, so the always-running summary step below can
