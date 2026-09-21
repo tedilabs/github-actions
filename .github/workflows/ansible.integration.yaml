@@ -24,11 +24,6 @@ on:
         required: false
         description: "(Optional) The path to a Galaxy requirements file, relative to the repository root (e.g. `ansible/requirements.yaml`). When set, its collections are installed so `ansible-lint` can resolve them. When omitted, `ansible-lint` installs a `requirements.yml` found in the project directory on its own."
 
-      python_version:
-        type: string
-        required: false
-        default: latest
-        description: "(Optional) The version of `python` to install when the repository does not pin one in `mise.toml` or `.tool-versions`. `ansible-lint` is installed into it with `pip`. Defaults to `latest`."
       ansible_lint_version:
         type: string
         required: false
@@ -46,27 +41,15 @@ jobs:
       id: checkout
       uses: actions/checkout@v7
 
-    # Written to a throwaway global mise config, so the repository's own `mise.toml` / `.tool-versions`
-    # still take precedence while a self-hosted runner's real global config is left untouched.
-    - name: Set Default Tool Versions
-      id: default-tools
-      env:
-        PYTHON_VERSION: ${{ inputs.python_version }}
-      run: |
-        config_file="$RUNNER_TEMP/mise-defaults.toml"
-        cat > "$config_file" <<TOML
-        [tools]
-        python = "$PYTHON_VERSION"
-        TOML
-
-        echo "MISE_GLOBAL_CONFIG_FILE=$config_file" >> "$GITHUB_ENV"
-
-    # Only `python` is installed, since `ansible-lint` comes from `pip` below. A repository that pins other
-    # tools in its mise config does not pay to install them for a lint job that never runs them.
+    # The tools and their versions come from the repository's mise config (`mise.toml` or `.tool-versions`),
+    # which therefore has to pin `python`. The project directory is passed so a `mise.toml` placed there
+    # overrides the repository-wide one, and only `python` is installed, since `ansible-lint` comes from
+    # `pip` below and the other tools a repository pins are never run by a lint job.
     - name: Set up tools
       id: setup-tools
       uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
       with:
+        working_directory: ${{ inputs.target_dir }}
         install_args: python
 
     - name: Install ansible-lint
