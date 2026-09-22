@@ -205,7 +205,25 @@ runs:
       META_BRANCH: ${{ env.SOURCE_BRANCH }}
       META_SHA: ${{ github.sha }}
     run: |
-      export UPLOAD_METADATA="github-repository=${META_REPOSITORY},github-author=${META_AUTHOR},git-branch=${META_BRANCH},git-sha=${META_SHA},deployed-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      # Built as JSON rather than the `k=v,k=v` shorthand: the shorthand parser
+      # treats `[`, `]`, `,` and `=` as syntax, so a value containing any of them
+      # fails parameter validation. `github.actor` is `<app>[bot]` for GitHub App
+      # commits, which is the case that surfaced this. `jq --arg` escapes the
+      # values, and `--metadata` accepts JSON just as well as shorthand.
+      UPLOAD_METADATA="$(jq -nc \
+        --arg github_repository "${META_REPOSITORY}" \
+        --arg github_author "${META_AUTHOR}" \
+        --arg git_branch "${META_BRANCH}" \
+        --arg git_sha "${META_SHA}" \
+        --arg deployed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+          "github-repository": $github_repository,
+          "github-author": $github_author,
+          "git-branch": $git_branch,
+          "git-sha": $git_sha,
+          "deployed-at": $deployed_at
+        }')"
+      export UPLOAD_METADATA
 
       python3 "${GITHUB_ACTION_PATH}/scripts/upload.py"
 
