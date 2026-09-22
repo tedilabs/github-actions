@@ -1,0 +1,7 @@
+# Modules
+- color: "fbca04"
+  description: "This issue or pull request is related to actions."
+  name: ":floppy_disk: actions"
+- color: "fbca04"
+  description: "This issue or pull request is related to workflows."
+  name: ":floppy_disk: workflows"

@@ -1,0 +1,10 @@
+# Modules
+":floppy_disk: actions":
+- changed-files:
+  - any-glob-to-any-file:
+    - .github/actions/**/*
+
+":floppy_disk: workflows":
+- changed-files:
+  - any-glob-to-any-file:
+    - .github/workflows/**/*
