@@ -1,32 +1,141 @@
-name: Integration - GitHub Actions
+name: GitHub Actions - Integration
 
 
 on:
-  push:
-    branches:
-    - main
-    paths:
-    - ".github/actions/**"
-    - ".github/workflows/**"
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
 
-  pull_request:
-    paths:
-    - ".github/actions/**"
-    - ".github/workflows/**"
+      actionlint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `actionlint` to install with mise. Defaults to `latest`."
+      shellcheck_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `shellcheck` to install with mise. Used by `actionlint` to check `run` scripts. Defaults to `latest`."
+      check_jsonschema_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `check-jsonschema` to install with mise. Defaults to `latest`."
 
-  workflow_dispatch: {}
+      actionlint_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to lint workflow files with `actionlint`. Defaults to `true`."
+      actionlint_config_file:
+        type: string
+        required: false
+        description: "(Optional) The path to the `actionlint` config file, relative to the repository root. When omitted, `actionlint` discovers `.github/actionlint.yaml` as usual."
+      actionlint_shellcheck_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether `actionlint` also checks `run` scripts with `shellcheck`. Defaults to `true`."
+      check_jsonschema_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to validate workflow files and action metadata files against the SchemaStore schemas with `check-jsonschema`. This is the only check that covers composite actions. Defaults to `true`."
 
-
-concurrency:
-  group: integration-github-actions-${{ github.ref }}
-  cancel-in-progress: true
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the integration report as a single sticky comment on pull requests. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
 
 
 jobs:
-  integration:
-    name: Integration
-    uses: tedilabs/github-actions/.github/workflows/github-actions.integration.yaml@main
+  lint:
+    name: Lint
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
-    permissions:
-      contents: read
-      pull-requests: write
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          actionlint = "${{ inputs.actionlint_version }}"
+          shellcheck = "${{ inputs.shellcheck_version }}"
+          "pipx:check-jsonschema" = "${{ inputs.check_jsonschema_version }}"
+
+    - name: Lint (actionlint)
+      id: actionlint
+      if: inputs.actionlint_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@main
+      with:
+        config_file: ${{ inputs.actionlint_config_file }}
+        shellcheck_enabled: ${{ inputs.actionlint_shellcheck_enabled }}
+
+    - name: Validate Workflows (check-jsonschema)
+      id: check-jsonschema-workflows
+      if: inputs.check_jsonschema_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@main
+      with:
+        schema_type: workflows
+
+    - name: Validate Actions (check-jsonschema)
+      id: check-jsonschema-actions
+      if: inputs.check_jsonschema_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/github-actions.check-jsonschema@main
+      with:
+        schema_type: actions
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ github.repository }}
+        id_label: Repository
+        artifact_prefix: github-actions-integration
+        job_status: ${{ job.status }}
+        # A check that ran but found no files reports `skipped`.
+        results: |
+          {
+            "actionlint": "${{ steps.actionlint.outputs.skipped == 'true' && 'skipped' || steps.actionlint.outcome }}",
+            "check-jsonschema (workflows)": "${{ steps.check-jsonschema-workflows.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-workflows.outcome }}",
+            "check-jsonschema (actions)": "${{ steps.check-jsonschema-actions.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-actions.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - lint
+    if: always()
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Repository
+        artifact_prefix: github-actions-integration
+        title: GitHub Actions Integration
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: github-actions-integration
