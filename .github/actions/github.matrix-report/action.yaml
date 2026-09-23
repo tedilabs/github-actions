@@ -180,5 +180,6 @@ runs:
     with:
       marker: ${{ inputs.pr_comment_marker }}
       body: ${{ steps.render.outputs.report }}
+      strategy: recreate
       skip_if_unchanged: "true"
       github_token: ${{ inputs.github_token }}
