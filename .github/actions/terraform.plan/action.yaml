@@ -1,0 +1,421 @@
+name: Terraform - Plan
+description: Run `terraform plan` against a workspace, save the plan file, and expose what would change as structured outputs. The readable plan is rendered from the saved plan file into the job log, and on failure it is added to the job summary. Requires the `terraform` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Terraform project directory to plan. Defaults to `./`."
+  workspace:
+    required: false
+    description: "(Optional) The Terraform workspace to plan against, exported as `TF_WORKSPACE`. Defaults to Terraform's `default` workspace."
+  plan_file:
+    required: false
+    description: "(Optional) The path the plan file is written to. Defaults to a file under `RUNNER_TEMP`, which keeps it out of the checkout so it is never committed or linted."
+  args:
+    required: false
+    description: "(Optional) Additional arguments to pass to `terraform plan` (e.g. `-refresh=false`)."
+  max_resources:
+    required: false
+    default: "50"
+    description: "(Optional) The maximum number of entries listed in the summary and in each structured output. Beyond it the list is truncated with a note, so one large workspace cannot fill a pull request comment or the 1 MB output limit. Defaults to `50`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate the reported lines in the pull request, from the diagnostics of the plan. Warnings are annotated even when the plan succeeds. Defaults to `true`."
+  diff_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether the summary shows the attribute diff of each changed resource in a collapsed block. The diff is sliced out of `terraform show`, so values marked `sensitive` stay redacted, but every other attribute value becomes visible wherever the summary is published. Set to `false` to list the addresses only. Defaults to `true`."
+  diff_max_lines:
+    required: false
+    default: "60"
+    description: "(Optional) The maximum number of diff lines shown per resource before the block is truncated. Defaults to `60`."
+  summary_max_bytes:
+    required: false
+    default: "30000"
+    description: "(Optional) The maximum size of the rendered summary. One workspace has to stay well inside the 65,536 character limit of a pull request comment, which the report shares with every other workspace. Defaults to `30000`."
+
+outputs:
+  has_changes:
+    value: ${{ steps.plan.outputs.has_changes }}
+    description: "Whether the plan contains changes to apply. `true` or `false`."
+  plan_file:
+    value: ${{ steps.plan.outputs.plan_file }}
+    description: "The path of the saved plan file. Empty when the plan failed, or when the backend refused to save one."
+  plan_file_saved:
+    value: ${{ steps.plan.outputs.plan_file_saved }}
+    description: "Whether a plan file was saved. `false` when the workspace runs with remote execution, where the plan cannot be saved locally and so cannot be applied later."
+  plan_json_file:
+    value: ${{ steps.target.outputs.plan_json_file }}
+    description: "The path of the `terraform show -json` rendering of the plan file. Holds the full diff including attribute values, which is why it is passed as a path rather than as an output."
+  stream_file:
+    value: ${{ steps.target.outputs.stream_file }}
+    description: "The path of the newline-delimited JSON message stream of `terraform plan -json`. It is the only place the diagnostics live, since a saved plan file does not carry them."
+
+  create:
+    value: ${{ steps.plan.outputs.create }}
+    description: "The number of resources to be created."
+  update:
+    value: ${{ steps.plan.outputs.update }}
+    description: "The number of resources to be updated in place."
+  destroy:
+    value: ${{ steps.plan.outputs.destroy }}
+    description: "The number of resources to be destroyed."
+  replace:
+    value: ${{ steps.plan.outputs.replace }}
+    description: "The number of resources to be replaced."
+  drift_count:
+    value: ${{ steps.plan.outputs.drift_count }}
+    description: "The number of resources that changed outside of Terraform since the last apply."
+  warning_count:
+    value: ${{ steps.plan.outputs.warning_count }}
+    description: "The number of warning diagnostics the plan reported."
+  error_count:
+    value: ${{ steps.plan.outputs.error_count }}
+    description: "The number of error diagnostics the plan reported."
+
+  changes:
+    value: ${{ steps.plan.outputs.changes }}
+    description: "A JSON array of the planned changes, each `{action, address, reason}`, truncated to `max_resources`. Read it with `fromJson`. Attribute values are deliberately left out; use `plan_json_file` for those."
+  drift:
+    value: ${{ steps.plan.outputs.drift }}
+    description: "A JSON array of the resources that changed outside of Terraform, each `{action, address}`, truncated to `max_resources`. Read it with `fromJson`."
+  output_changes:
+    value: ${{ steps.plan.outputs.output_changes }}
+    description: "A JSON object mapping each root output to `{action, sensitive}`. Values are never included. Read it with `fromJson`."
+  diagnostics:
+    value: ${{ steps.plan.outputs.diagnostics }}
+    description: "A JSON array of the diagnostics, each `{severity, summary, filename, line}`, truncated to `max_resources`. Read it with `fromJson`."
+
+  headline:
+    value: ${{ steps.summary.outputs.headline }}
+    description: "A single line describing the plan, such as `🟩 +1 · 🟨 ~1 · 🟪 1 drifted`, meant to sit next to the workspace name in a report rather than above the body."
+  summary:
+    value: ${{ steps.summary.outputs.summary }}
+    description: "A Markdown summary, suitable for a job summary or a pull request comment. It describes the plan when there is one, and otherwise carries the tail of whichever command failed, so a reader never sees a bare failure with no reason."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      PLAN_FILE: ${{ inputs.plan_file }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+
+      # Unique per invocation, so calling this action twice in one job never lets the second call read
+      # the plan file, log or summary the first one left behind.
+      prefix="$RUNNER_TEMP/terraform-plan-$(head -c 15 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
+
+      # Diagnostics point at a file and a line, so link them to the blob on the commit being planned.
+      # On a pull request `github.sha` is the merge commit, whose tree is not what the author sees.
+      sha="${HEAD_SHA:-$GITHUB_SHA}"
+
+      {
+        echo "target_dir=$target_dir"
+        echo "file_url_prefix=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$sha/"
+        echo "plan_file=${PLAN_FILE:-$prefix.tfplan}"
+        echo "stream_file=$prefix.ndjson"
+        echo "plan_json_file=$prefix.json"
+        echo "log_file=$prefix.log"
+        echo "summary_file=$prefix.md"
+        echo "headline_file=$prefix.headline"
+      } >> "$GITHUB_OUTPUT"
+
+  - name: Terraform Init
+    id: init
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+    with:
+      run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
+
+        terraform -chdir="$TARGET_DIR" init -input=false -no-color
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: always() && steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ steps.init.outputs.log_file }}
+      lang: text
+
+  - name: Terraform Plan
+    id: plan
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+      PLAN_FILE: ${{ steps.target.outputs.plan_file }}
+      STREAM_FILE: ${{ steps.target.outputs.stream_file }}
+      PLAN_JSON_FILE: ${{ steps.target.outputs.plan_json_file }}
+      LOG_FILE: ${{ steps.target.outputs.log_file }}
+      SUMMARY_FILE: ${{ steps.target.outputs.summary_file }}
+      HEADLINE_FILE: ${{ steps.target.outputs.headline_file }}
+      ARGS: ${{ inputs.args }}
+      MAX_RESOURCES: ${{ inputs.max_resources }}
+      FILE_URL_PREFIX: ${{ steps.target.outputs.file_url_prefix }}
+      DIFF_ENABLED: ${{ inputs.diff_enabled }}
+      DIFF_MAX_LINES: ${{ inputs.diff_max_lines }}
+      SUMMARY_MAX_BYTES: ${{ inputs.summary_max_bytes }}
+      RENDER_SCRIPT: ${{ github.action_path }}/scripts/render-summary.py
+    run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
+      plan_file="$PLAN_FILE"
+      stream="$STREAM_FILE"
+      plan_json="$PLAN_JSON_FILE"
+      log="$LOG_FILE"
+      read -ra extra_args <<< "$ARGS"
+
+      # A caller that passes a fixed `plan_file` could otherwise leave one behind for the next call.
+      rm -f "$plan_file"
+
+      # `-json` emits a typed message stream that carries the diagnostics, which a saved plan file does not.
+      # It goes to a file rather than the log, because the readable plan is rendered from the plan file below.
+      # `-detailed-exitcode` returns 0 for no changes, 1 for an error, and 2 when there are changes.
+      exit_code=0
+      terraform -chdir="$TARGET_DIR" plan \
+        -json \
+        -out="$plan_file" \
+        -input=false \
+        -lock=false \
+        -detailed-exitcode \
+        "${extra_args[@]}" > "$stream" 2>&1 || exit_code=$?
+
+      # A workspace with remote execution cannot save a plan file. Fall back to a plan without `-out`, and
+      # without `-json` so its output is readable on its own, since there is no plan file to render from.
+      plan_file_saved=true
+      if [ "$exit_code" -eq 1 ] && grep -q "not support saving" "$stream"; then
+        echo "::warning::The backend refuses to save a plan file, which means remote execution. Re-planning without one; this workspace cannot be applied from a saved plan."
+        plan_file_saved=false
+        plan_file=""
+        exit_code=0
+        terraform -chdir="$TARGET_DIR" plan \
+          -input=false \
+          -lock=false \
+          -no-color \
+          -detailed-exitcode \
+          "${extra_args[@]}" 2>&1 | tee "$log" || exit_code="${PIPESTATUS[0]}"
+        : > "$stream"
+      fi
+
+      # `terraform show` re-renders the saved plan without planning again, so the log carries exactly what a
+      # plain `terraform plan` would have printed, minus the refresh progress.
+      echo '{}' > "$plan_json"
+      if [ -n "$plan_file" ] && [ -f "$plan_file" ]; then
+        terraform -chdir="$TARGET_DIR" show -no-color "$plan_file" | tee "$log" || true
+        if terraform -chdir="$TARGET_DIR" show -json "$plan_file" > "$plan_json.tmp" 2>/dev/null; then
+          mv "$plan_json.tmp" "$plan_json"
+        else
+          rm -f "$plan_json.tmp"
+        fi
+      fi
+
+      # Without a plan file the diagnostics are all there is to show, so render them readably.
+      if [ ! -s "$log" ] && [ -s "$stream" ]; then
+        jq -r 'select(.type == "diagnostic")
+          | .diagnostic
+          | "\(.severity | ascii_upcase): \(.summary)"
+            + (if (.range.filename // "") != "" then "\n  on \(.range.filename) line \(.range.start.line)" else "" end)
+            + (if (.detail // "") != "" then "\n\n\(.detail)\n" else "" end)
+        ' "$stream" | tee "$log"
+      fi
+
+      diagnostics_json="$(jq -s -c --argjson max "$MAX_RESOURCES" '
+        [ .[] | select(.type == "diagnostic") | .diagnostic
+          | {severity, summary, filename: (.range.filename // ""), line: (.range.start.line // 0)} ]
+        | .[0:$max]
+      ' "$stream" 2>/dev/null || echo '[]')"
+      counts="$(jq -s -c '
+        [ .[] | select(.type == "diagnostic") | .diagnostic.severity ] as $s
+        | {warning: ($s | map(select(. == "warning")) | length), error: ($s | map(select(. == "error")) | length)}
+      ' "$stream" 2>/dev/null || echo '{"warning":0,"error":0}')"
+
+      # A failed plan writes no file, so neither the path nor the flag may claim one exists; the caller
+      # gates its artifact upload on them.
+      if [ -n "$plan_file" ] && [ ! -f "$plan_file" ]; then
+        plan_file=""
+        plan_file_saved=false
+      fi
+
+      {
+        echo "plan_file=$plan_file"
+        echo "plan_file_saved=$plan_file_saved"
+        echo "warning_count=$(jq -r '.warning' <<< "$counts")"
+        echo "error_count=$(jq -r '.error' <<< "$counts")"
+        echo "diagnostics=$diagnostics_json"
+      } >> "$GITHUB_OUTPUT"
+
+      # The summary is rendered even for a failed plan, so its diagnostics reach the report as links
+      # rather than as a bare excerpt of the log.
+      render() {
+        python3 "$RENDER_SCRIPT" \
+          --part "$2" \
+          --plan-json "$plan_json" \
+          --plan-text "$log" \
+          --stream "$stream" \
+          --target-dir "$TARGET_DIR" \
+          --file-url-prefix "$FILE_URL_PREFIX" \
+          --max-resources "$MAX_RESOURCES" \
+          --diff-max-lines "$DIFF_MAX_LINES" \
+          --max-bytes "$SUMMARY_MAX_BYTES" \
+          --diff "$DIFF_ENABLED" \
+          --failed "$1"
+      }
+
+      if [ "$exit_code" -eq 1 ]; then
+        render true body > "$SUMMARY_FILE" || rm -f "$SUMMARY_FILE"
+        render true headline > "$HEADLINE_FILE" || rm -f "$HEADLINE_FILE"
+        echo "::error::terraform plan failed."
+        exit 1
+      fi
+
+      if [ "$exit_code" -eq 2 ]; then
+        has_changes=true
+      else
+        has_changes=false
+      fi
+      echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+
+      # Counts and the resource list come from the machine-readable plan, never from the log text.
+      resource_counts="$(jq -c '
+        [(.resource_changes // [])[] | .change.actions] as $a
+        | {
+            create:  ($a | map(select(. == ["create"])) | length),
+            update:  ($a | map(select(. == ["update"])) | length),
+            destroy: ($a | map(select(. == ["delete"])) | length),
+            replace: ($a | map(select(. == ["delete","create"] or . == ["create","delete"])) | length)
+          }
+      ' "$plan_json")"
+      jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "$resource_counts" >> "$GITHUB_OUTPUT"
+
+      # Structured lists stay small on purpose: addresses and actions only, never attribute values, and
+      # truncated to `max_resources` so they cannot approach the 1 MB limit on step outputs.
+      {
+        echo "changes=$(jq -c --argjson max "$MAX_RESOURCES" '
+          [ (.resource_changes // [])[]
+            | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+            | {action: (.change.actions | join("+")), address, reason: (.action_reason // "")} ]
+          | .[0:$max]
+        ' "$plan_json")"
+        echo "drift=$(jq -c --argjson max "$MAX_RESOURCES" '
+          [ (.resource_drift // [])[] | {action: (.change.actions | join("+")), address} ] | .[0:$max]
+        ' "$plan_json")"
+        echo "output_changes=$(jq -c '
+          (.output_changes // {}) | with_entries(.value |= {action: (.actions | join("+")), sensitive: ((.before_sensitive // false) or (.after_sensitive // false))})
+        ' "$plan_json")"
+        echo "drift_count=$(jq -r '(.resource_drift // []) | length' "$plan_json")"
+      } >> "$GITHUB_OUTPUT"
+
+      if [ -z "$plan_file" ]; then
+        # Without a plan file there is nothing machine-readable to summarise, so say so plainly
+        # rather than rendering an empty table that would read as "no changes".
+        summary="> [!WARNING]"$'\n'"> This workspace runs with remote execution, so no plan file was saved."$'\n'"> The plan output is in the job log, and this workspace cannot be applied from a saved plan."
+      else
+        summary="$(render false body)"
+        render false headline > "$HEADLINE_FILE"
+      fi
+
+      # Written to a file rather than an output, so the always-running summary step below can
+      # pick it up whether this step reached the end or not.
+      printf '%s\n' "$summary" > "$SUMMARY_FILE"
+
+  # GitHub only renders annotations from `::error` lines, so the diagnostics are read from the message
+  # stream. Paths are relative to the module, so `target_dir` is prefixed.
+  - name: Annotate Findings
+    id: plan-annotate
+    if: always() && inputs.annotations_enabled == 'true'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      STREAM_FILE: ${{ steps.target.outputs.stream_file }}
+    run: |
+      if [ -z "$STREAM_FILE" ] || [ ! -s "$STREAM_FILE" ]; then
+        exit 0
+      fi
+
+      prefix=""
+      if [ "$TARGET_DIR" != "." ] && [ "$TARGET_DIR" != "./" ]; then
+        prefix="${TARGET_DIR%/}/"
+      fi
+
+      # A workflow command takes one line, so newlines and the property separators are percent-encoded the
+      # way the runner decodes them.
+      jq -r --arg prefix "$prefix" '
+        def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+        def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
+        select(.type == "diagnostic")
+        | .diagnostic
+        | (if .severity == "error" then "error" else "warning" end) as $severity
+        | (.summary + (if (.detail // "") != "" then "\n\n" + .detail else "" end) | esc) as $message
+        | ("terraform plan · " + .summary | prop) as $title
+        | if (.range.filename // "") != "" then
+            "::\($severity) file=\($prefix + .range.filename),line=\(.range.start.line),col=\(.range.start.column),title=\($title)::\($message)"
+          else
+            "::\($severity) title=\($title)::\($message)"
+          end
+      ' "$STREAM_FILE" || true
+
+  # Runs even when init or plan failed, so the caller always has something to show.
+  - name: Build Summary
+    id: summary
+    if: always()
+    shell: bash
+    env:
+      MAX_LOG_LINES: "30"
+      INIT_LOG: ${{ steps.init.outputs.log_file }}
+      LOG_FILE: ${{ steps.target.outputs.log_file }}
+      SUMMARY_FILE: ${{ steps.target.outputs.summary_file }}
+      HEADLINE_FILE: ${{ steps.target.outputs.headline_file }}
+    run: |
+      excerpt() {
+        printf '```text\n%s\n```\n' "$(tail -n "$MAX_LOG_LINES" "$1")"
+      }
+
+      if [ -n "$SUMMARY_FILE" ] && [ -f "$SUMMARY_FILE" ]; then
+        summary="$(cat "$SUMMARY_FILE")"
+      elif [ -n "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+        summary="> [!CAUTION]"$'\n'"> \`terraform plan\` failed."$'\n\n'"$(excerpt "$LOG_FILE")"
+      elif [ -n "$INIT_LOG" ] && [ -s "$INIT_LOG" ]; then
+        summary="> [!CAUTION]"$'\n'"> \`terraform init\` failed, so nothing was planned."$'\n\n'"$(excerpt "$INIT_LOG")"
+      else
+        summary="> [!CAUTION]"$'\n'"> The plan did not run. See the job log."
+      fi
+
+      headline=""
+      if [ -n "$HEADLINE_FILE" ] && [ -f "$HEADLINE_FILE" ]; then
+        headline="$(head -n 1 "$HEADLINE_FILE")"
+      fi
+
+      {
+        echo "headline=$headline"
+        echo "summary<<TERRAFORM_PLAN_EOF"
+        echo "$summary"
+        echo "TERRAFORM_PLAN_EOF"
+      } >> "$GITHUB_OUTPUT"
+
+  - name: Add Failure Details to Job Summary
+    id: plan-summary
+    if: always() && steps.plan.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform plan · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ steps.target.outputs.log_file }}
+      lang: text
