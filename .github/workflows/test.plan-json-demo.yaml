@@ -1,0 +1,106 @@
+name: Test - plan JSON demo
+
+
+on:
+  pull_request:
+    branches:
+    - "**"
+
+
+jobs:
+  plan:
+    name: Plan (${{ matrix.workspace }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+        - plan-demo
+        - plan-demo-error
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          terraform = "1.16.3"
+
+    - name: Plan
+      id: plan
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/terraform.plan@test/plan-json-demo
+      with:
+        target_dir: fixtures/${{ matrix.workspace }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@test/plan-json-demo
+      with:
+        mode: collect
+        id: fixtures/${{ matrix.workspace }}
+        id_label: Workspace
+        artifact_prefix: plan-json-demo
+        job_status: ${{ job.status }}
+        details: ${{ steps.plan.outputs.summary }}
+        headline: ${{ steps.plan.outputs.headline }}
+        results: |
+          {
+            "plan": "${{ steps.plan.outcome }}"
+          }
+
+    # Shows that the structured outputs are still there and parse, without filling the report.
+    - name: Structured outputs
+      id: outputs
+      if: always()
+      env:
+        HAS_CHANGES: ${{ steps.plan.outputs.has_changes }}
+        CREATE: ${{ steps.plan.outputs.create }}
+        UPDATE: ${{ steps.plan.outputs.update }}
+        DESTROY: ${{ steps.plan.outputs.destroy }}
+        REPLACE: ${{ steps.plan.outputs.replace }}
+        DRIFT_COUNT: ${{ steps.plan.outputs.drift_count }}
+        WARNING_COUNT: ${{ steps.plan.outputs.warning_count }}
+        ERROR_COUNT: ${{ steps.plan.outputs.error_count }}
+        CHANGES: ${{ steps.plan.outputs.changes }}
+        DIAGNOSTICS: ${{ steps.plan.outputs.diagnostics }}
+        PLAN_JSON_FILE: ${{ steps.plan.outputs.plan_json_file }}
+        STREAM_FILE: ${{ steps.plan.outputs.stream_file }}
+      run: |
+        printf 'has_changes=%s create=%s update=%s destroy=%s replace=%s drift=%s warnings=%s errors=%s\n' \
+          "$HAS_CHANGES" "$CREATE" "$UPDATE" "$DESTROY" "$REPLACE" "$DRIFT_COUNT" "$WARNING_COUNT" "$ERROR_COUNT"
+        printf 'changes     (%s bytes): %s\n' "$(printf '%s' "$CHANGES" | wc -c | tr -d ' ')" "$CHANGES"
+        printf 'diagnostics (%s bytes): %s\n' "$(printf '%s' "$DIAGNOSTICS" | wc -c | tr -d ' ')" "$DIAGNOSTICS"
+        printf 'plan_json_file: %s bytes\n' "$(wc -c < "$PLAN_JSON_FILE" 2>/dev/null || echo 0)"
+        printf 'stream_file:    %s bytes\n' "$(wc -c < "$STREAM_FILE" 2>/dev/null || echo 0)"
+
+
+  report:
+    name: Report
+    needs:
+    - plan
+    if: always()
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@test/plan-json-demo
+      with:
+        mode: publish
+        id_label: Workspace
+        artifact_prefix: plan-json-demo
+        title: Terraform Plan
+        table_enabled: "false"
+        pr_comment_marker: plan-json-demo
