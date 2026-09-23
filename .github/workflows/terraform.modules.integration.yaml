@@ -188,6 +188,7 @@ jobs:
       uses: tedilabs/github-actions/.github/actions/terraform.tflint@main
       with:
         target_dir: ${{ matrix.path }}
+        mode: module
         config_file: ${{ inputs.tflint_config_file }}
         minimum_failure_severity: ${{ inputs.tflint_minimum_failure_severity }}
         recursive: ${{ inputs.tflint_recursive }}

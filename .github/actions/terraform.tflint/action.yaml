@@ -7,6 +7,14 @@ inputs:
     required: false
     default: ./
     description: "(Optional) The directory to lint. Defaults to `./`."
+  mode:
+    required: false
+    default: module
+    description: "(Optional) What kind of Terraform directory is being linted. `module` lints the configuration as written. `workspace` lints it as a named Terraform workspace, which is needed when the configuration references `terraform.workspace` (e.g. to locate `<workspace>/config.yaml`) — `tflint` evaluates that expression as `default` unless it is told otherwise. Valid values are `module` or `workspace`. Defaults to `module`."
+  workspace:
+    required: false
+    default: default
+    description: "(Optional) The Terraform workspace name to lint as, exported as `TF_WORKSPACE`. Only used when `mode` is `workspace`, and an empty value falls back to the default. Defaults to Terraform's `default` workspace."
   config_file:
     required: false
     default: .tflint.hcl
@@ -61,9 +69,30 @@ runs:
     shell: bash
     env:
       TARGET_DIR: ${{ inputs.target_dir }}
+      MODE: ${{ inputs.mode }}
+      WORKSPACE: ${{ inputs.workspace }}
       CONFIG_FILE: ${{ inputs.config_file }}
       RECURSIVE: ${{ inputs.recursive }}
     run: |
+      # `tflint` reads the configuration and its input variables, but never the state or the backend. The one
+      # thing it cannot infer is the workspace: `terraform.workspace` evaluates to `default` unless
+      # `TF_WORKSPACE` is set. Resolving it here keeps every `tflint` call below on the same workspace.
+      case "$MODE" in
+        module)
+          workspace=""
+          ;;
+        workspace)
+          # The caller may pass an empty workspace (e.g. a matrix entry for a single-workspace project),
+          # which the action input default does not cover.
+          workspace="${WORKSPACE:-default}"
+          ;;
+        *)
+          echo "::error::Invalid mode: $MODE. Valid values are module or workspace."
+          exit 1
+          ;;
+      esac
+      echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+
       # A trailing slash (e.g. `./`) makes `--recursive` silently skip every subdirectory, so strip it.
       target_dir="${TARGET_DIR%/}"
       target_dir="${target_dir:-.}"
@@ -132,12 +161,17 @@ runs:
     uses: tedilabs/github-actions/.github/actions/shell.run@main
     env:
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      WORKSPACE: ${{ steps.target.outputs.workspace }}
       CONFIG: ${{ steps.target.outputs.config }}
       RECURSIVE: ${{ inputs.recursive }}
       MINIMUM_FAILURE_SEVERITY: ${{ inputs.minimum_failure_severity }}
       FORMAT: ${{ inputs.format }}
     with:
       run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
+
         args=(--chdir "$TARGET_DIR")
         if [ -n "$CONFIG" ]; then
           args+=(--config "$CONFIG")
@@ -158,9 +192,14 @@ runs:
     shell: bash
     env:
       TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      WORKSPACE: ${{ steps.target.outputs.workspace }}
       CONFIG: ${{ steps.target.outputs.config }}
       RECURSIVE: ${{ inputs.recursive }}
     run: |
+      if [ -n "$WORKSPACE" ]; then
+        export TF_WORKSPACE="$WORKSPACE"
+      fi
+
       args=(--chdir "$TARGET_DIR")
       if [ -n "$CONFIG" ]; then
         args+=(--config "$CONFIG")
