@@ -1,0 +1,105 @@
+name: GitHub Pull Request - Lint Title
+description: "Check that the pull request title follows Conventional Commits (`type(scope)!: subject`). With squash merges the title becomes the commit message, which release tools such as `release-please` read to compute the next version. Run it on the `opened`, `edited`, `reopened` and `synchronize` events so that title changes are checked."
+
+
+inputs:
+  title:
+    required: false
+    default: ${{ github.event.pull_request.title }}
+    description: "(Optional) The pull request title to check. Defaults to the title of the pull request that triggered the workflow."
+  types:
+    required: false
+    default: |
+      build
+      chore
+      ci
+      docs
+      feat
+      fix
+      perf
+      refactor
+      revert
+      style
+      test
+    description: "(Optional) The allowed types, one per line. Defaults to the default types of `conventional-pre-commit`: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style` and `test`."
+  scope_required:
+    required: false
+    default: "false"
+    description: "(Optional) Whether a scope such as `feat(iam-role): ...` is required. Defaults to `false`."
+
+outputs:
+  type:
+    value: ${{ steps.lint.outputs.type }}
+    description: "The type of the title (e.g. `feat`)."
+  scope:
+    value: ${{ steps.lint.outputs.scope }}
+    description: "The scope of the title without parentheses (e.g. `iam-role`). Empty if the title has no scope."
+  breaking:
+    value: ${{ steps.lint.outputs.breaking }}
+    description: "Whether the title marks a breaking change with `!`. `true` or `false`."
+  subject:
+    value: ${{ steps.lint.outputs.subject }}
+    description: "The subject of the title after `: `."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Lint Pull Request Title
+    id: lint
+    shell: bash
+    env:
+      TITLE: ${{ inputs.title }}
+      TYPES: ${{ inputs.types }}
+      SCOPE_REQUIRED: ${{ inputs.scope_required }}
+    run: |
+      # Escape a value for a workflow command such as `::error::`.
+      escape() {
+        local value="${1//'%'/'%25'}"
+        value="${value//$'\r'/'%0D'}"
+        printf '%s' "${value//$'\n'/'%0A'}"
+      }
+
+      # Join the allowed types into a regex alternation. Only plain words are accepted so that a type cannot inject regex syntax.
+      types=""
+      while IFS= read -r type; do
+        type="${type//[[:space:]]/}"
+        if [ -z "$type" ]; then
+          continue
+        fi
+        if [[ ! "$type" =~ ^[A-Za-z0-9_-]+$ ]]; then
+          echo "::error title=Invalid input::$(escape "The type '$type' in \`types\` must consist of letters, digits, \`_\` or \`-\`.")"
+          exit 1
+        fi
+        types="${types:+$types|}$type"
+      done <<< "$TYPES"
+      if [ -z "$types" ]; then
+        echo "::error title=Invalid input::\`types\` must list at least one type, one per line."
+        exit 1
+      fi
+
+      # Groups: 1 = type, 3 = scope, 4 = `!`, 5 = subject.
+      pattern="^(${types})(\(([^()[:space:]]+)\))?(!)?: ([^[:space:]].*)$"
+      expected="\`type(scope)!: subject\` with one of the types: ${types//|/, }"
+      if [ "$SCOPE_REQUIRED" = "true" ]; then
+        expected="${expected}. A scope is required"
+      fi
+
+      if [[ ! "$TITLE" =~ $pattern ]] || { [ "$SCOPE_REQUIRED" = "true" ] && [ -z "${BASH_REMATCH[3]}" ]; }; then
+        echo "::error title=Invalid pull request title::$(escape "The title '$TITLE' does not follow Conventional Commits. Expected ${expected}.")"
+        exit 1
+      fi
+
+      breaking=false
+      if [ -n "${BASH_REMATCH[4]}" ]; then
+        breaking=true
+      fi
+      delimiter="$(head -c 15 /dev/urandom | base64)"
+      {
+        printf 'type=%s\n' "${BASH_REMATCH[1]}"
+        printf 'scope=%s\n' "${BASH_REMATCH[3]}"
+        printf 'breaking=%s\n' "$breaking"
+        printf 'subject<<%s\n%s\n%s\n' "$delimiter" "${BASH_REMATCH[5]}" "$delimiter"
+      } >> "$GITHUB_OUTPUT"
+      echo "The title follows Conventional Commits (type: ${BASH_REMATCH[1]}, scope: ${BASH_REMATCH[3]:-none}, breaking: ${breaking})."
