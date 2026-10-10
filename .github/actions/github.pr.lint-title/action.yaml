@@ -1,5 +1,5 @@
 name: GitHub Pull Request - Lint Title
-description: "Lint the pull request title with `commitlint`. With squash merges the title becomes the commit message, which release tools such as `release-please` read to compute the next version. Uses the repository's commitlint config when it exists, so titles follow the same rules as local commits; otherwise `@commitlint/config-conventional`. Run it on the `opened`, `edited`, `reopened` and `synchronize` events of `pull_request` so that title changes are checked."
+description: "Lint the pull request title with `commitlint`. With squash merges the title becomes the commit message, which release tools such as `release-please` read to compute the next version. Installs commitlint with mise at the version of `npm:@commitlint/cli` in the repository's mise config, and uses the repository's commitlint config, so titles follow the same rules as local commits. Run it on the `opened`, `edited`, `reopened` and `synchronize` events of `pull_request` so that title changes are checked."
 
 
 inputs:
@@ -13,14 +13,12 @@ inputs:
     description: "(Optional) The commitlint config file, relative to the workspace. It is used only when the file exists, so check out the repository first to use it; otherwise `@commitlint/config-conventional` is used. Never check out the head of a pull request in a `pull_request_target` workflow to read it, because a config can load code from the repository. Defaults to `.commitlintrc.yaml`."
   commitlint_version:
     required: false
-    default: "21.2.3"
-    description: "(Optional) The version of the `@commitlint` packages to install. Keep it equal to the version of the local `commit-msg` hook so that both apply the same rules. Defaults to `21.2.3`."
-  node_version:
-    required: false
-    default: "24"
-    description: "(Optional) The version of Node.js to set up. Defaults to `24`."
+    description: "(Optional) The version of the `@commitlint` packages to install. Defaults to the version of `npm:@commitlint/cli` in the repository's mise config (check out the repository first), or `21.2.3` if it is not set there."
 
 outputs:
+  version:
+    value: ${{ steps.install.outputs.version }}
+    description: "The version of the `@commitlint` packages used."
   type:
     value: ${{ steps.lint.outputs.type }}
     description: "The type of the title (e.g. `feat`), as parsed by commitlint."
@@ -39,10 +37,12 @@ runs:
   using: composite
 
   steps:
-  - name: Set up Node.js
-    uses: actions/setup-node@v6
+  # Install only mise here. The commitlint packages are installed in the next step, not every tool of the repository.
+  - name: Set up mise
+    uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
     with:
-      node-version: ${{ inputs.node_version }}
+      install: "false"
+      cache_key_prefix: mise-v1-github-pr-lint-title
 
   - name: Install commitlint
     id: install
@@ -50,18 +50,33 @@ runs:
     env:
       COMMITLINT_VERSION: ${{ inputs.commitlint_version }}
     run: |
-      if [[ ! "$COMMITLINT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "::error title=Invalid input::\`commitlint_version\` must be an exact version such as \`21.2.3\`."
+      version="$COMMITLINT_VERSION"
+      if [ -z "$version" ]; then
+        version="$(mise current npm:@commitlint/cli 2>/dev/null || true)"
+      fi
+      version="${version:-21.2.3}"
+      if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "::error title=Invalid input::The commitlint version '${version}' must be an exact version such as \`21.2.3\`."
         exit 1
       fi
 
+      mise install \
+        "npm:@commitlint/cli@${version}" \
+        "npm:@commitlint/config-conventional@${version}" \
+        "npm:@commitlint/load@${version}" \
+        "npm:@commitlint/parse@${version}"
+
+      # Expose the packages that are imported directly in one `node_modules`, so that `NODE_PATH` can resolve them:
+      # `@commitlint/config-conventional` for `extends` in a config file anywhere, and `load`/`parse` for the parse script.
       prefix="$RUNNER_TEMP/github-pr-lint-title"
-      npm install --prefix "$prefix" --no-save --no-audit --no-fund --ignore-scripts \
-        "@commitlint/cli@${COMMITLINT_VERSION}" \
-        "@commitlint/config-conventional@${COMMITLINT_VERSION}" \
-        "@commitlint/load@${COMMITLINT_VERSION}" \
-        "@commitlint/parse@${COMMITLINT_VERSION}"
-      echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+      mkdir -p "$prefix/node_modules/@commitlint"
+      for package in config-conventional load parse; do
+        ln -sfn "$(mise where "npm:@commitlint/${package}@${version}")/node_modules/@commitlint/${package}" "$prefix/node_modules/@commitlint/${package}"
+      done
+      {
+        echo "version=$version"
+        echo "prefix=$prefix"
+      } >> "$GITHUB_OUTPUT"
 
   - name: Lint Pull Request Title
     id: lint
@@ -69,6 +84,7 @@ runs:
     env:
       TITLE: ${{ inputs.title }}
       CONFIG_FILE: ${{ inputs.config_file }}
+      VERSION: ${{ steps.install.outputs.version }}
       PREFIX: ${{ steps.install.outputs.prefix }}
     run: |
       # Escape a value for a workflow command such as `::error::`.
@@ -84,16 +100,15 @@ runs:
         printf 'extends:\n- "@commitlint/config-conventional"\n' > "$config"
         echo "Using \`@commitlint/config-conventional\` because \`${CONFIG_FILE}\` does not exist."
       fi
-      # Resolve `extends` and parser presets from the installed packages, wherever the config file is.
       export NODE_PATH="$PREFIX/node_modules"
 
       exitcode=0
-      result="$(printf '%s\n' "$TITLE" | "$PREFIX/node_modules/.bin/commitlint" --config "$config" 2>&1)" || exitcode=$?
+      result="$(printf '%s\n' "$TITLE" | mise exec "npm:@commitlint/cli@${VERSION}" -- commitlint --config "$config" 2>&1)" || exitcode=$?
       if [ -n "$result" ]; then
         echo "$result"
       fi
       if [ "$exitcode" -ne 0 ]; then
-        echo "::error title=Invalid pull request title::$(escape "The title '$TITLE' does not pass commitlint:"$'\n'"$result")"
+        echo "::error title=Invalid pull request title::$(escape "The title '$TITLE' does not pass commitlint ${VERSION}:"$'\n'"$result")"
         exit 1
       fi
 
@@ -114,4 +129,4 @@ runs:
       }
       console.log(`The title passes commitlint (type: ${outputs.type}, scope: ${outputs.scope || "none"}, breaking: ${outputs.breaking}).`);
       EOF
-      CONFIG="$config" node "$PREFIX/parse.mjs"
+      CONFIG="$config" mise exec "npm:@commitlint/cli@${VERSION}" -- node "$PREFIX/parse.mjs"
