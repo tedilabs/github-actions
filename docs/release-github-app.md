@@ -2,7 +2,7 @@
 
 This guide sets up the GitHub App that release workflows (such as `release-please`) use to open release pull requests, push version bumps, and create tags and GitHub releases.
 
-Workflows never store a long-lived release token. They store the App's client ID and private key as organization secrets, and mint a short-lived token in the step `release-github-token` at run time.
+Workflows never store a long-lived release token. They store the App's ID and private key as organization secrets, and mint a short-lived token in the step `release-github-token` at run time.
 
 ## Why a GitHub App
 
@@ -42,7 +42,7 @@ Do not grant **Workflows**. A release pull request only changes `VERSION` (and a
 
 On the App's settings page:
 
-1. Copy the **Client ID** (it starts with `Iv`). `actions/create-github-app-token` v3 takes `client-id`; the numeric App ID input `app-id` is deprecated.
+1. Copy the **App ID** (a number). `actions/create-github-app-token` v3 prefers `client-id` and marks `app-id` as deprecated, but actionlint (v1.7.12) still requires `app-id` for this action, so our workflows use `app-id` until actionlint catches up. Switch to the **Client ID** (it starts with `Iv`) and `client-id` then.
 2. Under **Private keys**, select **Generate a private key**. A `.pem` file is downloaded. Store it as a secret in step 4, then delete the local file.
 
 ## 3. Install the App
@@ -55,13 +55,13 @@ Use **Selected repositories** visibility and keep the list in sync with the App 
 
 | Secret | Value |
 |---|---|
-| `RELEASE_GITHUB_APP_CLIENT_ID` | The Client ID from step 2 |
+| `RELEASE_GITHUB_APP_ID` | The App ID from step 2 |
 | `RELEASE_GITHUB_APP_PRIVATE_KEY` | The full contents of the `.pem` file from step 2 |
 
 With the GitHub CLI (requires an organization admin):
 
 ```sh
-gh secret set RELEASE_GITHUB_APP_CLIENT_ID --org tedilabs --visibility selected --repos terraform-aws-account
+gh secret set RELEASE_GITHUB_APP_ID --org tedilabs --visibility selected --repos terraform-aws-account
 gh secret set RELEASE_GITHUB_APP_PRIVATE_KEY --org tedilabs --visibility selected --repos terraform-aws-account < tedilabs-release.private-key.pem
 ```
 
@@ -82,7 +82,8 @@ jobs:
       id: release-github-token
       uses: actions/create-github-app-token@v3
       with:
-        client-id: ${{ secrets.RELEASE_GITHUB_APP_CLIENT_ID }}
+        # `client-id` replaces `app-id` in v3, but actionlint does not know it yet.
+        app-id: ${{ secrets.RELEASE_GITHUB_APP_ID }}
         private-key: ${{ secrets.RELEASE_GITHUB_APP_PRIVATE_KEY }}
         # Narrow the token to what this job needs, even if the App has more.
         permission-contents: write
