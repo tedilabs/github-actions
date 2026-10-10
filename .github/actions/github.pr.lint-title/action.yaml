@@ -1,42 +1,35 @@
 name: GitHub Pull Request - Lint Title
-description: "Check that the pull request title follows Conventional Commits (`type(scope)!: subject`). With squash merges the title becomes the commit message, which release tools such as `release-please` read to compute the next version. Run it on the `opened`, `edited`, `reopened` and `synchronize` events so that title changes are checked."
+description: "Lint the pull request title with `commitlint`. With squash merges the title becomes the commit message, which release tools such as `release-please` read to compute the next version. Uses the repository's commitlint config when it exists, so titles follow the same rules as local commits; otherwise `@commitlint/config-conventional`. Run it on the `opened`, `edited`, `reopened` and `synchronize` events of `pull_request` so that title changes are checked."
 
 
 inputs:
   title:
     required: false
     default: ${{ github.event.pull_request.title }}
-    description: "(Optional) The pull request title to check. Defaults to the title of the pull request that triggered the workflow."
-  types:
+    description: "(Optional) The pull request title to lint. Defaults to the title of the pull request that triggered the workflow."
+  config_file:
     required: false
-    default: |
-      build
-      chore
-      ci
-      docs
-      feat
-      fix
-      perf
-      refactor
-      revert
-      style
-      test
-    description: "(Optional) The allowed types, one per line. Defaults to the default types of `conventional-pre-commit`: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style` and `test`."
-  scope_required:
+    default: ".commitlintrc.yaml"
+    description: "(Optional) The commitlint config file, relative to the workspace. It is used only when the file exists, so check out the repository first to use it; otherwise `@commitlint/config-conventional` is used. Never check out the head of a pull request in a `pull_request_target` workflow to read it, because a config can load code from the repository. Defaults to `.commitlintrc.yaml`."
+  commitlint_version:
     required: false
-    default: "false"
-    description: "(Optional) Whether a scope such as `feat(iam-role): ...` is required. Defaults to `false`."
+    default: "21.2.3"
+    description: "(Optional) The version of the `@commitlint` packages to install. Keep it equal to the version of the local `commit-msg` hook so that both apply the same rules. Defaults to `21.2.3`."
+  node_version:
+    required: false
+    default: "24"
+    description: "(Optional) The version of Node.js to set up. Defaults to `24`."
 
 outputs:
   type:
     value: ${{ steps.lint.outputs.type }}
-    description: "The type of the title (e.g. `feat`)."
+    description: "The type of the title (e.g. `feat`), as parsed by commitlint."
   scope:
     value: ${{ steps.lint.outputs.scope }}
     description: "The scope of the title without parentheses (e.g. `iam-role`). Empty if the title has no scope."
   breaking:
     value: ${{ steps.lint.outputs.breaking }}
-    description: "Whether the title marks a breaking change with `!`. `true` or `false`."
+    description: "Whether the title marks a breaking change (e.g. `feat!: ...`), as parsed by commitlint. `true` or `false`."
   subject:
     value: ${{ steps.lint.outputs.subject }}
     description: "The subject of the title after `: `."
@@ -46,13 +39,37 @@ runs:
   using: composite
 
   steps:
+  - name: Set up Node.js
+    uses: actions/setup-node@v6
+    with:
+      node-version: ${{ inputs.node_version }}
+
+  - name: Install commitlint
+    id: install
+    shell: bash
+    env:
+      COMMITLINT_VERSION: ${{ inputs.commitlint_version }}
+    run: |
+      if [[ ! "$COMMITLINT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "::error title=Invalid input::\`commitlint_version\` must be an exact version such as \`21.2.3\`."
+        exit 1
+      fi
+
+      prefix="$RUNNER_TEMP/github-pr-lint-title"
+      npm install --prefix "$prefix" --no-save --no-audit --no-fund --ignore-scripts \
+        "@commitlint/cli@${COMMITLINT_VERSION}" \
+        "@commitlint/config-conventional@${COMMITLINT_VERSION}" \
+        "@commitlint/load@${COMMITLINT_VERSION}" \
+        "@commitlint/parse@${COMMITLINT_VERSION}"
+      echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+
   - name: Lint Pull Request Title
     id: lint
     shell: bash
     env:
       TITLE: ${{ inputs.title }}
-      TYPES: ${{ inputs.types }}
-      SCOPE_REQUIRED: ${{ inputs.scope_required }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+      PREFIX: ${{ steps.install.outputs.prefix }}
     run: |
       # Escape a value for a workflow command such as `::error::`.
       escape() {
@@ -61,45 +78,40 @@ runs:
         printf '%s' "${value//$'\n'/'%0A'}"
       }
 
-      # Join the allowed types into a regex alternation. Only plain words are accepted so that a type cannot inject regex syntax.
-      types=""
-      while IFS= read -r type; do
-        type="${type//[[:space:]]/}"
-        if [ -z "$type" ]; then
-          continue
-        fi
-        if [[ ! "$type" =~ ^[A-Za-z0-9_-]+$ ]]; then
-          echo "::error title=Invalid input::$(escape "The type '$type' in \`types\` must consist of letters, digits, \`_\` or \`-\`.")"
-          exit 1
-        fi
-        types="${types:+$types|}$type"
-      done <<< "$TYPES"
-      if [ -z "$types" ]; then
-        echo "::error title=Invalid input::\`types\` must list at least one type, one per line."
+      config="$CONFIG_FILE"
+      if [ -z "$config" ] || [ ! -f "$config" ]; then
+        config="$PREFIX/commitlintrc.yaml"
+        printf 'extends:\n- "@commitlint/config-conventional"\n' > "$config"
+        echo "Using \`@commitlint/config-conventional\` because \`${CONFIG_FILE}\` does not exist."
+      fi
+      # Resolve `extends` and parser presets from the installed packages, wherever the config file is.
+      export NODE_PATH="$PREFIX/node_modules"
+
+      exitcode=0
+      result="$(printf '%s\n' "$TITLE" | "$PREFIX/node_modules/.bin/commitlint" --config "$config" 2>&1)" || exitcode=$?
+      if [ -n "$result" ]; then
+        echo "$result"
+      fi
+      if [ "$exitcode" -ne 0 ]; then
+        echo "::error title=Invalid pull request title::$(escape "The title '$TITLE' does not pass commitlint:"$'\n'"$result")"
         exit 1
       fi
 
-      # Groups: 1 = type, 3 = scope, 4 = `!`, 5 = subject.
-      pattern="^(${types})(\(([^()[:space:]]+)\))?(!)?: ([^[:space:]].*)$"
-      expected="\`type(scope)!: subject\` with one of the types: ${types//|/, }"
-      if [ "$SCOPE_REQUIRED" = "true" ]; then
-        expected="${expected}. A scope is required"
-      fi
+      # Parse the title with the same parser preset as the lint, and expose the parts as outputs.
+      cat > "$PREFIX/parse.mjs" <<'EOF'
+      import { appendFileSync } from "node:fs";
+      import { randomUUID } from "node:crypto";
+      import load from "@commitlint/load";
+      import parse from "@commitlint/parse";
 
-      if [[ ! "$TITLE" =~ $pattern ]] || { [ "$SCOPE_REQUIRED" = "true" ] && [ -z "${BASH_REMATCH[3]}" ]; }; then
-        echo "::error title=Invalid pull request title::$(escape "The title '$TITLE' does not follow Conventional Commits. Expected ${expected}.")"
-        exit 1
-      fi
-
-      breaking=false
-      if [ -n "${BASH_REMATCH[4]}" ]; then
-        breaking=true
-      fi
-      delimiter="$(head -c 15 /dev/urandom | base64)"
-      {
-        printf 'type=%s\n' "${BASH_REMATCH[1]}"
-        printf 'scope=%s\n' "${BASH_REMATCH[3]}"
-        printf 'breaking=%s\n' "$breaking"
-        printf 'subject<<%s\n%s\n%s\n' "$delimiter" "${BASH_REMATCH[5]}" "$delimiter"
-      } >> "$GITHUB_OUTPUT"
-      echo "The title follows Conventional Commits (type: ${BASH_REMATCH[1]}, scope: ${BASH_REMATCH[3]:-none}, breaking: ${breaking})."
+      const config = await load({}, { file: process.env.CONFIG });
+      const parsed = await parse(process.env.TITLE, undefined, config.parserPreset?.parserOpts);
+      const breaking = parsed.notes.some((note) => /^BREAKING[ -]CHANGE$/.test(note.title));
+      const outputs = { type: parsed.type, scope: parsed.scope, breaking: String(breaking), subject: parsed.subject };
+      for (const [key, value] of Object.entries(outputs)) {
+        const delimiter = `ghadelimiter_${randomUUID()}`;
+        appendFileSync(process.env.GITHUB_OUTPUT, `${key}<<${delimiter}\n${value ?? ""}\n${delimiter}\n`);
+      }
+      console.log(`The title passes commitlint (type: ${outputs.type}, scope: ${outputs.scope || "none"}, breaking: ${outputs.breaking}).`);
+      EOF
+      CONFIG="$config" node "$PREFIX/parse.mjs"
