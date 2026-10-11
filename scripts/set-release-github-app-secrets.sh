@@ -6,7 +6,7 @@
 # so they never appear in command-line arguments.
 #
 # Usage:
-#   export RELEASE_GITHUB_APP_ID=123456
+#   export RELEASE_GITHUB_APP_CLIENT_ID=Iv23li0123456789abcd
 #   export RELEASE_GITHUB_APP_PRIVATE_KEY="$(cat tedilabs-release.private-key.pem)"
 #   scripts/set-release-github-app-secrets.sh [--dry-run] [REPOSITORY...]
 #
@@ -27,10 +27,10 @@ for arg in "$@"; do
   esac
 done
 
-: "${RELEASE_GITHUB_APP_ID:?Set RELEASE_GITHUB_APP_ID to the numeric App ID.}"
+: "${RELEASE_GITHUB_APP_CLIENT_ID:?Set RELEASE_GITHUB_APP_CLIENT_ID to the Client ID of the App.}"
 : "${RELEASE_GITHUB_APP_PRIVATE_KEY:?Set RELEASE_GITHUB_APP_PRIVATE_KEY to the contents of the private key (.pem).}"
-if [[ ! $RELEASE_GITHUB_APP_ID =~ ^[0-9]+$ ]]; then
-  echo "[x] RELEASE_GITHUB_APP_ID must be the numeric App ID, not the Client ID." >&2
+if [[ ! $RELEASE_GITHUB_APP_CLIENT_ID =~ ^Iv[0-9A-Za-z.]+$ ]]; then
+  echo "[x] RELEASE_GITHUB_APP_CLIENT_ID must be the Client ID (it starts with 'Iv'), not the numeric App ID." >&2
   exit 1
 fi
 if [[ $RELEASE_GITHUB_APP_PRIVATE_KEY != "-----BEGIN "*"PRIVATE KEY-----"* ]]; then
@@ -48,7 +48,7 @@ if [ ${#repos[@]} -eq 0 ]; then
   echo "[x] No repositories found in '${owner}'." >&2
   exit 1
 fi
-echo "[!] Setting RELEASE_GITHUB_APP_ID and RELEASE_GITHUB_APP_PRIVATE_KEY in ${#repos[@]} repositories of '${owner}'."
+echo "[!] Setting RELEASE_GITHUB_APP_CLIENT_ID and RELEASE_GITHUB_APP_PRIVATE_KEY in ${#repos[@]} repositories of '${owner}'."
 
 failed=()
 for repo in "${repos[@]}"; do
@@ -56,7 +56,7 @@ for repo in "${repos[@]}"; do
     echo "    would set: ${owner}/${repo}"
     continue
   fi
-  if printf '%s' "$RELEASE_GITHUB_APP_ID" | gh secret set RELEASE_GITHUB_APP_ID --repo "${owner}/${repo}" > /dev/null \
+  if printf '%s' "$RELEASE_GITHUB_APP_CLIENT_ID" | gh secret set RELEASE_GITHUB_APP_CLIENT_ID --repo "${owner}/${repo}" > /dev/null \
     && printf '%s' "$RELEASE_GITHUB_APP_PRIVATE_KEY" | gh secret set RELEASE_GITHUB_APP_PRIVATE_KEY --repo "${owner}/${repo}" > /dev/null; then
     echo "    set: ${owner}/${repo}"
   else
