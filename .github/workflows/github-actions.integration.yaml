@@ -78,8 +78,7 @@ jobs:
       with:
         mise_toml: |
           [tools]
-          # The backend is named explicitly since the pinned mise predates the `jactionlint` registry entry.
-          "github:jdx/jactionlint" = "${{ inputs.actionlint_version }}"
+          jactionlint = "${{ inputs.actionlint_version }}"
           shellcheck = "${{ inputs.shellcheck_version }}"
           "pipx:check-jsonschema" = "${{ inputs.check_jsonschema_version }}"
 
