@@ -1,0 +1,50 @@
+name: GitHub - Release Please
+description: Run release-please with a GitHub App token so that its release pull requests trigger other workflows.
+
+inputs:
+  github_app_client_id:
+    required: true
+    description: "(Required) The Client ID of the GitHub App used to create release pull requests and releases."
+  github_app_private_key:
+    required: true
+    description: "(Required) The private key of the GitHub App."
+  config_file:
+    required: false
+    default: release-please-config.json
+    description: "(Optional) The path to the release-please config file. Defaults to `release-please-config.json`."
+  manifest_file:
+    required: false
+    default: .release-please-manifest.json
+    description: "(Optional) The path to the release-please manifest file. Defaults to `.release-please-manifest.json`."
+
+outputs:
+  release_created:
+    description: "`true` if a release of the root component was created."
+    value: ${{ steps.release-please.outputs.release_created }}
+  tag_name:
+    description: The tag name of the created release.
+    value: ${{ steps.release-please.outputs.tag_name }}
+  version:
+    description: The version of the created release.
+    value: ${{ steps.release-please.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+  - name: Generate GitHub App Token
+    id: github-app-token
+    uses: actions/create-github-app-token@v3
+    with:
+      client-id: ${{ inputs.github_app_client_id }}
+      private-key: ${{ inputs.github_app_private_key }}
+      permission-contents: write
+      permission-issues: write
+      permission-pull-requests: write
+
+  - name: Release Please
+    id: release-please
+    uses: googleapis/release-please-action@v5
+    with:
+      token: ${{ steps.github-app-token.outputs.token }}
+      config-file: ${{ inputs.config_file }}
+      manifest-file: ${{ inputs.manifest_file }}
