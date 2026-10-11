@@ -84,7 +84,8 @@ jobs:
     - uses: actions/create-github-app-token@v3
       id: app-token
       with:
-        app-id: ${{ secrets.github_app_id }}
+        # `client-id` replaces the deprecated `app-id` and also accepts the numeric App ID.
+        client-id: ${{ secrets.github_app_id }}
         private-key: ${{ secrets.github_app_private_key }}
         owner: ${{ github.repository_owner }}
 
