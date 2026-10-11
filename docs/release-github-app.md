@@ -42,7 +42,7 @@ Do not grant **Workflows**. A release pull request only changes `VERSION` (and a
 
 On the App's settings page:
 
-1. Copy the **App ID** (a number). `actions/create-github-app-token` v3 prefers `client-id` and marks `app-id` as deprecated, but actionlint (v1.7.12) still requires `app-id` for this action, so our workflows use `app-id` until actionlint catches up. Switch to the **Client ID** (it starts with `Iv`) and `client-id` then.
+1. Copy the **App ID** (a number). Workflows pass it as the `client-id` input of `actions/create-github-app-token` v3, which replaces the deprecated `app-id` and accepts either the App ID or the **Client ID** (it starts with `Iv`).
 2. Under **Private keys**, select **Generate a private key**. A `.pem` file is downloaded. Store it as a secret in step 4, then delete the local file.
 
 ## 3. Install the App
@@ -96,8 +96,8 @@ jobs:
       id: release-github-token
       uses: actions/create-github-app-token@v3
       with:
-        # `client-id` replaces `app-id` in v3, but actionlint does not know it yet.
-        app-id: ${{ secrets.RELEASE_GITHUB_APP_ID }}
+        # `client-id` replaces the deprecated `app-id` and also accepts the numeric App ID.
+        client-id: ${{ secrets.RELEASE_GITHUB_APP_ID }}
         private-key: ${{ secrets.RELEASE_GITHUB_APP_PRIVATE_KEY }}
         # Narrow the token to what this job needs, even if the App has more.
         permission-contents: write
