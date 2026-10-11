@@ -27,6 +27,18 @@ outputs:
   version:
     description: The version of the created release.
     value: ${{ steps.release-please.outputs.version }}
+  major:
+    description: The major version of the created release.
+    value: ${{ steps.release-please.outputs.major }}
+  minor:
+    description: The minor version of the created release.
+    value: ${{ steps.release-please.outputs.minor }}
+  patch:
+    description: The patch version of the created release.
+    value: ${{ steps.release-please.outputs.patch }}
+  sha:
+    description: The commit SHA that the created release was tagged at.
+    value: ${{ steps.release-please.outputs.sha }}
 
 runs:
   using: composite
