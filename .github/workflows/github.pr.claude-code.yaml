@@ -51,7 +51,7 @@ on:
         description: "(Optional) The region of the AWS."
 
     secrets:
-      github_app_id:
+      github_app_client_id:
         required: true
       github_app_private_key:
         required: true
@@ -84,8 +84,7 @@ jobs:
     - uses: actions/create-github-app-token@v3
       id: app-token
       with:
-        # `client-id` replaces the deprecated `app-id` and also accepts the numeric App ID.
-        client-id: ${{ secrets.github_app_id }}
+        client-id: ${{ secrets.github_app_client_id }}
         private-key: ${{ secrets.github_app_private_key }}
         owner: ${{ github.repository_owner }}
 
