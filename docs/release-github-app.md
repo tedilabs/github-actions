@@ -2,7 +2,7 @@
 
 This guide sets up the GitHub App that release workflows (such as `release-please`) use to open release pull requests, push version bumps, and create tags and GitHub releases.
 
-Workflows never store a long-lived release token. They store the App's Client ID and private key as organization secrets, and mint a short-lived token in the step `release-github-token` at run time.
+Workflows never store a long-lived release token. They store the App's Client ID and private key as organization secrets, and mint a short-lived token at run time with the `github.release-please` action.
 
 ## Why a GitHub App
 
@@ -42,7 +42,7 @@ Do not grant **Workflows**. A release pull request only changes `VERSION` (and a
 
 On the App's settings page:
 
-1. Copy the **Client ID** (it starts with `Iv`), not the numeric App ID. Workflows pass it as the `client-id` input of `actions/create-github-app-token` v3, which replaces the deprecated `app-id`.
+1. Copy the **Client ID** (it starts with `Iv`), not the numeric App ID. Workflows pass it to the `github_app_client_id` input of `github.release-please`, which passes it as the `client-id` input of `actions/create-github-app-token` v3. `client-id` replaces the deprecated `app-id`.
 2. Under **Private keys**, select **Generate a private key**. A `.pem` file is downloaded. Store it as a secret in step 4, then delete the local file.
 
 ## 3. Install the App
@@ -92,24 +92,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Generate GitHub App Token
-      id: release-github-token
-      uses: actions/create-github-app-token@v3
-      with:
-        client-id: ${{ secrets.RELEASE_GITHUB_APP_CLIENT_ID }}
-        private-key: ${{ secrets.RELEASE_GITHUB_APP_PRIVATE_KEY }}
-        # Narrow the token to what this job needs, even if the App has more.
-        permission-contents: write
-        permission-issues: write
-        permission-pull-requests: write
-
     - name: Release Please
-      uses: googleapis/release-please-action@v5
+      uses: tedilabs/github-actions/.github/actions/github.release-please@main
       with:
-        token: ${{ steps.release-github-token.outputs.token }}
+        github_app_client_id: ${{ secrets.RELEASE_GITHUB_APP_CLIENT_ID }}
+        github_app_private_key: ${{ secrets.RELEASE_GITHUB_APP_PRIVATE_KEY }}
 ```
 
-The token is scoped to the current repository by default and is revoked when the job ends. The workflow-level `permissions: {}` drops the unused `GITHUB_TOKEN` permissions.
+The action mints a token narrowed to `contents`, `issues`, and `pull-requests` write, even if the App has more permissions, and runs `release-please` with `release-please-config.json` and `.release-please-manifest.json`. The token is scoped to the current repository and is revoked when the job ends. The workflow-level `permissions: {}` drops the unused `GITHUB_TOKEN` permissions.
 
 ## What changes for maintainers
 
