@@ -17,13 +17,13 @@ on:
       actionlint_version:
         type: string
         required: false
-        default: latest
-        description: "(Optional) The version of `actionlint` to install with mise. Defaults to `latest`."
+        default: "2.1.0"
+        description: "(Optional) The version of `jactionlint`, an actively maintained fork of `actionlint`, to install with mise. Pinned by default because its releases add checks. Defaults to `2.1.0`."
       shellcheck_version:
         type: string
         required: false
         default: latest
-        description: "(Optional) The version of `shellcheck` to install with mise. Used by `actionlint` to check `run` scripts. Defaults to `latest`."
+        description: "(Optional) The version of `shellcheck` to install with mise. Used by `jactionlint` to check `run` scripts. Defaults to `latest`."
       check_jsonschema_version:
         type: string
         required: false
@@ -34,16 +34,21 @@ on:
         type: boolean
         required: false
         default: true
-        description: "(Optional) Whether to lint workflow files with `actionlint`. Defaults to `true`."
+        description: "(Optional) Whether to lint workflow files with `jactionlint`. Defaults to `true`."
       actionlint_config_file:
         type: string
         required: false
-        description: "(Optional) The path to the `actionlint` config file, relative to the repository root. When omitted, `actionlint` discovers `.github/actionlint.yaml` as usual."
+        description: "(Optional) The path to the `jactionlint` config file, relative to the repository root. When omitted, `jactionlint` discovers `.github/jactionlint.yaml` or `.github/actionlint.yaml`."
+      actionlint_profile:
+        type: string
+        required: false
+        default: correctness
+        description: "(Optional) The `jactionlint` rule profile: `correctness` (the checks of the original `actionlint`), `default` or `pedantic`. Defaults to `correctness`."
       actionlint_shellcheck_enabled:
         type: boolean
         required: false
         default: true
-        description: "(Optional) Whether `actionlint` also checks `run` scripts with `shellcheck`. Defaults to `true`."
+        description: "(Optional) Whether `jactionlint` also checks `run` scripts with `shellcheck`. Defaults to `true`."
       check_jsonschema_enabled:
         type: boolean
         required: false
@@ -73,17 +78,18 @@ jobs:
       with:
         mise_toml: |
           [tools]
-          actionlint = "${{ inputs.actionlint_version }}"
+          jactionlint = "${{ inputs.actionlint_version }}"
           shellcheck = "${{ inputs.shellcheck_version }}"
           "pipx:check-jsonschema" = "${{ inputs.check_jsonschema_version }}"
 
-    - name: Lint (actionlint)
+    - name: Lint (jactionlint)
       id: actionlint
       if: inputs.actionlint_enabled
       continue-on-error: true
       uses: tedilabs/github-actions/.github/actions/github-actions.actionlint@main
       with:
         config_file: ${{ inputs.actionlint_config_file }}
+        profile: ${{ inputs.actionlint_profile }}
         shellcheck_enabled: ${{ inputs.actionlint_shellcheck_enabled }}
 
     - name: Validate Workflows (check-jsonschema)
@@ -115,7 +121,7 @@ jobs:
         # A check that ran but found no files reports `skipped`.
         results: |
           {
-            "actionlint": "${{ steps.actionlint.outputs.skipped == 'true' && 'skipped' || steps.actionlint.outcome }}",
+            "jactionlint": "${{ steps.actionlint.outputs.skipped == 'true' && 'skipped' || steps.actionlint.outcome }}",
             "check-jsonschema (workflows)": "${{ steps.check-jsonschema-workflows.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-workflows.outcome }}",
             "check-jsonschema (actions)": "${{ steps.check-jsonschema-actions.outputs.skipped == 'true' && 'skipped' || steps.check-jsonschema-actions.outcome }}"
           }
