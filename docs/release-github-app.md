@@ -79,7 +79,7 @@ scripts/set-release-github-app-secrets.sh            # or pass repository names 
 unset RELEASE_GITHUB_APP_CLIENT_ID RELEASE_GITHUB_APP_PRIVATE_KEY
 ```
 
-The script targets the non-archived `tedilabs` repositories named `terraform-*` with the `type-module` topic, passes the values to `gh` through standard input, and lists the repositories where it failed. Run it again after rotating the key or adding a repository. Workflows read repository secrets with the same `secrets.RELEASE_GITHUB_APP_CLIENT_ID` and `secrets.RELEASE_GITHUB_APP_PRIVATE_KEY` expressions.
+The script targets the non-archived `tedilabs` repositories named `terraform-*` with the `type-module` topic, passes the values to `gh` through standard input, deletes the `RELEASE_GITHUB_APP_ID` secret that an earlier version of this guide used, and lists the repositories where it failed. Run it again after rotating the key or adding a repository. Workflows read repository secrets with the same `secrets.RELEASE_GITHUB_APP_CLIENT_ID` and `secrets.RELEASE_GITHUB_APP_PRIVATE_KEY` expressions.
 
 ## 5. Use it in a workflow
 
