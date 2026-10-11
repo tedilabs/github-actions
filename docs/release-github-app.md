@@ -67,6 +67,20 @@ gh secret set RELEASE_GITHUB_APP_PRIVATE_KEY --org tedilabs --visibility selecte
 
 To add a repository later, add it to the App installation **and** to the visibility of both secrets.
 
+### On the GitHub Free plan
+
+Private repositories cannot use organization secrets on the GitHub Free plan. Set the same two secrets as repository secrets in every Terraform module repository instead:
+
+```sh
+export RELEASE_GITHUB_APP_ID=123456
+export RELEASE_GITHUB_APP_PRIVATE_KEY="$(cat tedilabs-release.private-key.pem)"
+scripts/set-release-github-app-secrets.sh --dry-run  # list the target repositories
+scripts/set-release-github-app-secrets.sh            # or pass repository names to limit the targets
+unset RELEASE_GITHUB_APP_ID RELEASE_GITHUB_APP_PRIVATE_KEY
+```
+
+The script targets the non-archived `tedilabs` repositories named `terraform-*` with the `type-module` topic, passes the values to `gh` through standard input, and lists the repositories where it failed. Run it again after rotating the key or adding a repository. Workflows read repository secrets with the same `secrets.RELEASE_GITHUB_APP_ID` and `secrets.RELEASE_GITHUB_APP_PRIVATE_KEY` expressions.
+
 ## 5. Use it in a workflow
 
 ```yaml
