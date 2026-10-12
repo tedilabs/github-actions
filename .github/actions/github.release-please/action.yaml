@@ -21,6 +21,12 @@ outputs:
   release_created:
     description: "`true` if a release of the root component was created."
     value: ${{ steps.release-please.outputs.release_created }}
+  upload_url:
+    description: "The URL for uploading assets to the created release. It is a URI template that ends with `{?name,label}`."
+    value: ${{ steps.release-please.outputs.upload_url }}
+  html_url:
+    description: The URL of the created release page.
+    value: ${{ steps.release-please.outputs.html_url }}
   tag_name:
     description: The tag name of the created release.
     value: ${{ steps.release-please.outputs.tag_name }}
