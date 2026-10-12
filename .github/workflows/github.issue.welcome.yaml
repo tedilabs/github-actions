@@ -23,7 +23,7 @@ on:
           Hey, thanks for your contribution! Please give us a bit of time to review it. 😄
 
           **Be sure to follow the issue template!**
-        description: "(Optional) The welcome message to post on the first issue created by a contributor."
+        description: "(Optional) The welcome message to post on the first issue created by a contributor, independently of their pull requests. An empty message skips issue greetings."
       pr_message:
         type: string
         required: false
@@ -33,24 +33,29 @@ on:
           Hey, thanks for your contribution! Please give us a bit of time to review it. 😄
 
           **Please check out our contributing guidelines.**
-        description: "(Optional) The welcome message to post on the first pull request created by a contributor."
+        description: "(Optional) The welcome message to post on the first pull request created by a contributor, independently of their issues. An empty message skips pull request greetings."
 
     secrets:
       token:
         required: false
-        description: "(Optional) The GitHub API token to use when communicating with GitHub API."
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API. Defaults to the workflow's default token. Requires `issues: write` for issues or `pull-requests: write` for pull requests."
 
 
 jobs:
   welcome:
     name: Welcome First Time Contributors
     runs-on: ${{ fromJson(inputs.runs_on) }}
+    if: ${{ contains(fromJson('["issues", "pull_request", "pull_request_target"]'), github.event_name) && github.event.action == 'opened' }}
+
+    concurrency:
+      group: github-issue-welcome-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
 
     steps:
     - name: Welcome for First Issue or Pull Request
       id: welcome
-      uses: actions/first-interaction@v3
+      uses: tedilabs/github-actions/.github/actions/github.issue.welcome@main
       with:
-        repo_token: ${{ secrets.token }}
+        github_token: ${{ secrets.token }}
         issue_message: ${{ inputs.issue_message }}
         pr_message: ${{ inputs.pr_message }}
