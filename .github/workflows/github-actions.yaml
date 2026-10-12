@@ -1,4 +1,4 @@
-name: GitHub Actions
+name: Integration - GitHub Actions
 
 
 on:
@@ -6,17 +6,19 @@ on:
     branches:
     - main
     paths:
-    - ".github/**"
+    - ".github/actions/**"
+    - ".github/workflows/**"
 
   pull_request:
     paths:
-    - ".github/**"
+    - ".github/actions/**"
+    - ".github/workflows/**"
 
   workflow_dispatch: {}
 
 
 concurrency:
-  group: github-actions-${{ github.ref }}
+  group: integration-github-actions-${{ github.ref }}
   cancel-in-progress: true
 
 
