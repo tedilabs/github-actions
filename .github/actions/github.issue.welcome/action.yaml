@@ -1,0 +1,89 @@
+name: GitHub - Issue Welcome
+description: Welcome a contributor on their first issue and first pull request, independently. Only opened events are handled. Existing marked welcome comments are left unchanged.
+
+
+inputs:
+  issue_message:
+    required: false
+    description: "(Optional) The Markdown message to post on the contributor's first issue in this repository. An empty message skips issue greetings."
+  pr_message:
+    required: false
+    description: "(Optional) The Markdown message to post on the contributor's first pull request in this repository. An empty message skips pull request greetings."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used to read contribution history and post comments. Requires `issues: write` for issues or `pull-requests: write` for pull requests. Defaults to the workflow's default token."
+
+outputs:
+  comment_id:
+    value: ${{ steps.welcome.outputs.comment_id }}
+    description: "The ID of the created or existing welcome comment. Empty when no welcome comment was needed."
+  operation:
+    value: ${{ steps.welcome.outputs.operation }}
+    description: "The performed operation, one of `created` or `skipped`."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Welcome for First Issue or Pull Request
+    id: welcome
+    uses: actions/github-script@v9
+    env:
+      ISSUE_MESSAGE: ${{ inputs.issue_message }}
+      PR_MESSAGE: ${{ inputs.pr_message }}
+    with:
+      github-token: ${{ inputs.github_token }}
+      script: |
+        core.setOutput('operation', 'skipped');
+
+        if (!['issues', 'pull_request', 'pull_request_target'].includes(context.eventName) || context.payload.action !== 'opened') {
+          core.info('Skipping: not an issue or pull request opened event.');
+          return;
+        }
+
+        const isPullRequest = context.payload.pull_request !== undefined;
+        const contribution = isPullRequest ? context.payload.pull_request : context.payload.issue;
+        const message = isPullRequest ? process.env.PR_MESSAGE : process.env.ISSUE_MESSAGE;
+        if (!message?.trim()) {
+          core.info('Skipping: no welcome message configured for this contribution type.');
+          return;
+        }
+
+        const { owner, repo } = context.repo;
+        const issue_number = contribution.number;
+
+        // The issues API includes PRs and supports creator filtering. The pulls API does not.
+        // Compare with earlier numbers so delayed runs still greet the first contribution.
+        for await (const { data } of github.paginate.iterator(github.rest.issues.listForRepo, {
+          owner, repo, creator: contribution.user.login, state: 'all', per_page: 100,
+        })) {
+          const hasEarlierContribution = data.some(
+            (item) => Boolean(item.pull_request) === isPullRequest && item.number < issue_number,
+          );
+          if (hasEarlierContribution) {
+            core.info(`Skipping: @${contribution.user.login} has an earlier ${isPullRequest ? 'pull request' : 'issue'}.`);
+            return;
+          }
+        }
+
+        // The caller must serialize runs for this issue/PR to make this check and write safe.
+        // Match the marker for both GitHub App tokens and personal access tokens.
+        const marker = '<!-- tedilabs/github.issue.welcome -->';
+        const comments = await github.paginate(github.rest.issues.listComments, {
+          owner, repo, issue_number, per_page: 100,
+        });
+        const existing = comments.find((comment) => comment.body?.startsWith(marker));
+        if (existing) {
+          core.setOutput('comment_id', existing.id);
+          core.info(`Skipping: welcome comment ${existing.id} already exists on #${issue_number}.`);
+          return;
+        }
+
+        const { data: created } = await github.rest.issues.createComment({
+          owner, repo, issue_number, body: `${marker}\n${message}`,
+        });
+        core.setOutput('comment_id', created.id);
+        core.setOutput('operation', 'created');
+        core.info(`Created welcome comment ${created.id} on #${issue_number}.`);
