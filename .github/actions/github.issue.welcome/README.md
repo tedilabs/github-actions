@@ -13,8 +13,17 @@ Messages are passed as data and retain their Markdown formatting.
 
 The reusable workflow supplies default messages, falls back to `github.token` when
 no token secret is provided, and serializes runs for the same issue or PR. Callers
-grant the permissions needed for their events; a PR-only caller needs only
-`pull-requests: write`.
+grant the permissions needed for their events. A PR-only caller needs both
+`issues: read` for the Issues API used to query contribution history and
+`pull-requests: write` for comments. An issue-only caller needs `issues: write`.
+
+```yaml
+permissions:
+  issues: read
+  pull-requests: write
+```
+
+For a caller handling both issues and pull requests:
 
 ```yaml
 name: Welcome

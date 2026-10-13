@@ -12,7 +12,7 @@ inputs:
   github_token:
     required: false
     default: ${{ github.token }}
-    description: "(Optional) The GitHub token used to read contribution history and post comments. Requires `issues: write` for issues or `pull-requests: write` for pull requests. Defaults to the workflow's default token."
+    description: "(Optional) The GitHub token used to read contribution history and post comments. Requires `issues: write` for issues; for pull requests, requires both `issues: read` for history and `pull-requests: write` for comments. Defaults to the workflow's default token."
 
 outputs:
   comment_id:
