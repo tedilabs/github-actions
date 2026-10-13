@@ -38,7 +38,7 @@ on:
     secrets:
       token:
         required: false
-        description: "(Optional) The GitHub API token to use when communicating with GitHub API. Defaults to the workflow's default token. Requires `issues: write` for issues or `pull-requests: write` for pull requests."
+        description: "(Optional) The GitHub API token to use when communicating with GitHub API. Defaults to the workflow's default token. Requires `issues: write` for issues; for pull requests, requires both `issues: read` for history and `pull-requests: write` for comments."
 
 
 jobs:
