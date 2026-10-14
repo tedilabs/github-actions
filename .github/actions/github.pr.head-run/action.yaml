@@ -1,0 +1,76 @@
+name: GitHub - Pull Request Head Run
+description: Resolve the pull request that produced the current commit and the workflow run that already ran against its head, so a later job can download the artifacts that run uploaded.
+
+
+inputs:
+  workflow:
+    required: true
+    description: "(Required) The file name of the workflow whose run is looked up (e.g. `terraform.integration.yaml`)."
+  sha:
+    required: false
+    default: ${{ github.sha }}
+    description: "(Optional) The commit to resolve the pull request from. Defaults to the commit that triggered the current run."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used to query the pull request and its workflow runs. Needs `actions: read` in addition to `contents: read`. Defaults to the automatically generated `github.token`."
+
+outputs:
+  found:
+    value: ${{ steps.lookup.outputs.found }}
+    description: "Whether both a pull request and a matching workflow run were found. `true` or `false`."
+  pr_number:
+    value: ${{ steps.lookup.outputs.pr_number }}
+    description: "The number of the pull request the commit came from. Empty when the commit is not associated with one."
+  head_sha:
+    value: ${{ steps.lookup.outputs.head_sha }}
+    description: "The head commit of that pull request, which is the commit the looked-up run ran against."
+  run_id:
+    value: ${{ steps.lookup.outputs.run_id }}
+    description: "The id of the most recent run of `workflow` against `head_sha`. Empty when none exists."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Look Up Pull Request Run
+    id: lookup
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      WORKFLOW: ${{ inputs.workflow }}
+      SHA: ${{ inputs.sha }}
+      REPOSITORY: ${{ github.repository }}
+    run: |
+      emit() {
+        {
+          echo "found=$1"
+          echo "pr_number=$2"
+          echo "head_sha=$3"
+          echo "run_id=$4"
+        } >> "$GITHUB_OUTPUT"
+      }
+
+      # A merge commit on the default branch lists the pull request it closed.
+      pr="$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" \
+        --jq 'map(select(.merged_at != null)) | sort_by(.merged_at) | last | .number // empty' 2>/dev/null || true)"
+      if [ -z "$pr" ]; then
+        echo "::notice::No merged pull request is associated with $SHA."
+        emit false "" "" ""
+        exit 0
+      fi
+
+      head_sha="$(gh api "repos/$REPOSITORY/pulls/$pr" --jq '.head.sha')"
+
+      # The run that planned this change is the last one for the pull request head.
+      run_id="$(gh api "repos/$REPOSITORY/actions/workflows/$WORKFLOW/runs?head_sha=$head_sha&per_page=100" \
+        --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.run_number) | last | .id // empty' 2>/dev/null || true)"
+      if [ -z "$run_id" ]; then
+        echo "::notice::No completed run of $WORKFLOW was found for $head_sha (pull request #$pr)."
+        emit false "$pr" "$head_sha" ""
+        exit 0
+      fi
+
+      echo "Pull request #$pr, head $head_sha, run $run_id."
+      emit true "$pr" "$head_sha" "$run_id"
