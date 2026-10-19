@@ -1,0 +1,6 @@
+formatter:
+  type: basic
+  retain_line_breaks: true
+  indentless_arrays: true
+  scan_folded_as_literal: true
+  pad_line_comments: 2
