@@ -1,35 +1,140 @@
-name: Integration - YAML
+name: YAML - Integration
 
 
 on:
-  push:
-    branches:
-    - main
-    paths:
-    - "**.yaml"
-    - "**.yml"
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
 
-  pull_request:
-    paths:
-    - "**.yaml"
-    - "**.yml"
+      yamllint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `yamllint` to install with mise. Defaults to `latest`."
+      yamlfmt_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `yamlfmt` to install with mise. Defaults to `latest`."
 
-  workflow_dispatch: {}
+      yamllint_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to lint YAML files with `yamllint`. Defaults to `true`."
+      yamllint_config_file:
+        type: string
+        required: false
+        description: "(Optional) The path to the `yamllint` config file, relative to the repository root. When omitted, `yamllint` discovers its config as usual."
+      yamllint_target_dir:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) The directory to lint recursively with `yamllint`. Defaults to `./`."
+      yamlfmt_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to check YAML formatting with `yamlfmt`, without modifying files. Defaults to `true`."
+      yamlfmt_config_file:
+        type: string
+        required: false
+        description: "(Optional) The path to the `yamlfmt` config file, relative to the repository root. When omitted, `yamlfmt` discovers its config as usual."
+      yamlfmt_target_dir:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) The directory to check recursively with `yamlfmt`. Defaults to `./`."
 
-
-concurrency:
-  group: integration-yaml-${{ github.ref }}
-  cancel-in-progress: true
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the integration report as a single sticky comment on pull requests. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
 
 
 jobs:
   lint:
-    name: Lint (yamllint)
-    uses: tedilabs/github-actions/.github/workflows/yaml.yamllint.yaml@main
+    name: Lint
+    runs-on: ${{ fromJson(inputs.runs_on) }}
 
-    with:
-      yamllint_version: latest
-      yamllint_config_file: .yamllint.yaml
-      yamllint_target_dir: ./
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    - name: Set up tools
+      id: setup-tools
+      if: inputs.yamllint_enabled || inputs.yamlfmt_enabled
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          "pipx:yamllint" = "${{ inputs.yamllint_version }}"
+          yamlfmt = "${{ inputs.yamlfmt_version }}"
+        install_args: >-
+          ${{ inputs.yamllint_enabled && 'pipx:yamllint' || '' }}
+          ${{ inputs.yamlfmt_enabled && 'yamlfmt' || '' }}
+
+    - name: Lint (yamllint)
+      id: yamllint
+      if: inputs.yamllint_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/yaml.yamllint@main
+      with:
+        config_file: ${{ inputs.yamllint_config_file }}
+        target_dir: ${{ inputs.yamllint_target_dir }}
+
+    - name: Check Format (yamlfmt)
+      id: yamlfmt
+      if: inputs.yamlfmt_enabled
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/yaml.yamlfmt@main
+      with:
+        config_file: ${{ inputs.yamlfmt_config_file }}
+        target_dir: ${{ inputs.yamlfmt_target_dir }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ github.repository }}
+        id_label: Repository
+        artifact_prefix: yaml-integration
+        job_status: ${{ job.status }}
+        # Disabled checks are left out of the report; checks with no target files report `skipped`.
+        results: |
+          {
+            "yamllint": "${{ inputs.yamllint_enabled && (steps.yamllint.outputs.skipped == 'true' && 'skipped' || steps.yamllint.outcome) || '' }}",
+            "yamlfmt": "${{ inputs.yamlfmt_enabled && (steps.yamlfmt.outputs.skipped == 'true' && 'skipped' || steps.yamlfmt.outcome) || '' }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - lint
+    if: always()
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Repository
+        artifact_prefix: yaml-integration
+        title: YAML Integration
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: yaml-integration

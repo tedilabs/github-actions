@@ -1,0 +1,104 @@
+name: YAML - yamlfmt
+description: Check that YAML files are formatted with `yamlfmt`, without modifying them. On failure, the diff is added to the job summary. Requires the `yamlfmt` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to check recursively for `.yaml` and `.yml` files. Uses standard path matching and honors the config's exclude rules. Defaults to `./`."
+  config_file:
+    required: false
+    description: "(Optional) The path to the `yamlfmt` config file, relative to the repository root. When omitted, `yamlfmt` discovers its config as usual."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate unformatted files in the pull request when `yamlfmt` fails. Defaults to `true`."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` is missing or contains no `.yaml` or `.yml` files and `yamlfmt` was not run. Empty otherwise."
+  stdout:
+    value: ${{ steps.fmt.outputs.stdout }}
+    description: "The STDOUT stream of the call to `yamlfmt`. Empty when skipped."
+  stderr:
+    value: ${{ steps.fmt.outputs.stderr }}
+    description: "The STDERR stream of the call to `yamlfmt`. Empty when skipped."
+  exitcode:
+    value: ${{ steps.fmt.outputs.exitcode }}
+    description: "The exit code of the call to `yamlfmt`. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      files=""
+      if [ -d "$target_dir" ]; then
+        files=$(find "$target_dir" -type f \( -name '*.yaml' -o -name '*.yml' \) -print -quit)
+      fi
+      if [ -z "$files" ]; then
+        echo "::notice::Skipping yamlfmt: no YAML files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
+      yamlfmt -version
+
+  - name: Check YAML Format
+    id: fmt
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+    with:
+      run: |
+        args=(-lint -output_format default -match_type standard -extensions "yaml,yml")
+        if [ -n "$CONFIG_FILE" ]; then
+          args+=(-conf "$CONFIG_FILE")
+        fi
+
+        yamlfmt "${args[@]}" -- "$TARGET_DIR"
+
+  # The line output names each unformatted file but provides no line numbers.
+  - name: Annotate Findings
+    id: fmt-annotate
+    if: always() && inputs.annotations_enabled == 'true' && steps.fmt.outcome == 'failure'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+    run: |
+      args=(-dry -output_format line -match_type standard -extensions "yaml,yml")
+      if [ -n "$CONFIG_FILE" ]; then
+        args+=(-conf "$CONFIG_FILE")
+      fi
+
+      yamlfmt "${args[@]}" -- "$TARGET_DIR" 2>/dev/null | awk '
+        /: formatting difference found$/ {
+          sub(/: formatting difference found$/, "")
+          gsub(/%/, "%25"); gsub(/\r/, "%0D"); gsub(/:/, "%3A"); gsub(/,/, "%2C")
+          printf "::error file=%s,title=yamlfmt · Not formatted::Run `yamlfmt` to format this file.\n", $0
+        }
+      ' || true
+
+  - name: Add Failure Details to Job Summary
+    id: fmt-summary
+    if: always() && steps.fmt.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ yamlfmt · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.fmt.outputs.log_file }}
+      lang: diff
