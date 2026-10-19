@@ -18,7 +18,7 @@ on:
         type: string
         required: false
         default: latest
-        description: "(Optional) The version of `yamllint` to install. Defaults to `latest`. Not implemented yet."
+        description: "(Optional) The version of `yamllint` to install with mise. Defaults to `latest`."
       yamllint_config_file:
         type: string
         required: false
@@ -46,9 +46,13 @@ jobs:
       id: checkout
       uses: actions/checkout@v7
 
-    - name: Install yamllint
-      id: install-yamllint
-      run: pip install yamllint
+    - name: Setup tools with mise
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          "pipx:yamllint" = "${{ inputs.yamllint_version }}"
 
     - name: Lint YAML Files
       id: yaml-lint
