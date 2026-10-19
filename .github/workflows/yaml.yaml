@@ -25,7 +25,7 @@ concurrency:
 jobs:
   integration:
     name: Integration
-    uses: tedilabs/github-actions/.github/workflows/yaml.integration.yaml@main
+    uses: tedilabs/github-actions/.github/workflows/yaml.integration.yaml@feat/yaml-integration
 
     permissions:
       contents: read

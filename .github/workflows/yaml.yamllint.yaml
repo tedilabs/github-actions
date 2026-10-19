@@ -56,7 +56,7 @@ jobs:
 
     - name: Lint YAML Files
       id: yaml-lint
-      uses: tedilabs/github-actions/.github/actions/yaml.yamllint@main
+      uses: tedilabs/github-actions/.github/actions/yaml.yamllint@feat/yaml-integration
       with:
         config_file: ${{ inputs.yamllint_config_file }}
         target_dir: ${{ inputs.yamllint_target_dir }}

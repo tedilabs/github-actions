@@ -88,7 +88,7 @@ jobs:
       id: yamllint
       if: inputs.yamllint_enabled
       continue-on-error: true
-      uses: tedilabs/github-actions/.github/actions/yaml.yamllint@main
+      uses: tedilabs/github-actions/.github/actions/yaml.yamllint@feat/yaml-integration
       with:
         config_file: ${{ inputs.yamllint_config_file }}
         target_dir: ${{ inputs.yamllint_target_dir }}
@@ -97,7 +97,7 @@ jobs:
       id: yamlfmt
       if: inputs.yamlfmt_enabled
       continue-on-error: true
-      uses: tedilabs/github-actions/.github/actions/yaml.yamlfmt@main
+      uses: tedilabs/github-actions/.github/actions/yaml.yamlfmt@feat/yaml-integration
       with:
         config_file: ${{ inputs.yamlfmt_config_file }}
         target_dir: ${{ inputs.yamlfmt_target_dir }}
