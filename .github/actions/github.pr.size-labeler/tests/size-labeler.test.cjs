@@ -9,68 +9,7 @@ const file = (name, additions, deletions = 0, status = 'modified') => ({ filenam
 const notFound = () => Object.assign(new Error('Not Found'), { status: 404 });
 const options = (extra = {}) => resolveOptions(extra);
 
-function fixture({ pages = [[file('main.tf', 10)]], config = {}, labels = [], comments = [], changedFiles, stale = false } = {}) {
-  const calls = [];
-  const outputs = {};
-  const failures = [];
-  let reads = 0;
-  const pr = {
-    head: { sha: 'head-sha' }, base: { sha: 'trusted-base-sha' },
-    changed_files: changedFiles ?? pages.flat().length,
-  };
-  const api = (name, implementation = () => ({})) => async (parameters) => {
-    calls.push({ name, parameters });
-    return implementation(parameters);
-  };
-  const github = {
-    graphql: api('graphql', () => ({ viewer: { login: 'github-actions[bot]' } })),
-    rest: {
-      repos: {
-        getContent: api('getContent', ({ path }) => {
-          if (!Object.hasOwn(config, path)) throw notFound();
-          return { data: { type: 'file', encoding: 'base64', content: Buffer.from(config[path]).toString('base64') } };
-        }),
-      },
-      pulls: {
-        get: api('getPull', () => ({ data: { ...pr, head: { sha: stale && reads++ ? 'new-head' : 'head-sha' } } })),
-        listFiles: Symbol('listFiles'),
-      },
-      issues: {
-        listLabelsOnIssue: Symbol('listLabels'),
-        listComments: Symbol('listComments'),
-        addLabels: api('addLabels'),
-        removeLabel: api('removeLabel'),
-        createComment: api('createComment'),
-        updateComment: api('updateComment'),
-      },
-    },
-  };
-  github.paginate = async (method, parameters) => {
-    calls.push({ name: method.description, parameters });
-    if (method === github.rest.issues.listLabelsOnIssue) return labels.map((name) => ({ name }));
-    if (method === github.rest.issues.listComments) return comments;
-    throw new Error('Unexpected pagination method');
-  };
-  github.paginate.iterator = async function* (method, parameters) {
-    assert.equal(method, github.rest.pulls.listFiles);
-    assert.equal(parameters.per_page, 100);
-    for (const data of pages) {
-      calls.push({ name: 'filePage', parameters });
-      yield { data };
-    }
-  };
-  const context = { repo: { owner: 'tedilabs', repo: 'example' }, payload: { pull_request: { number: 42 } } };
-  const core = {
-    info() {}, warning() {},
-    setOutput: (name, value) => { outputs[name] = value; },
-    setFailed: (message) => { failures.push(message); },
-  };
-  return {
-    github, context, core, calls, outputs, failures,
-    execute: (inputs = {}, implementation = run) => implementation({ github, context, core, inputs }),
-    writes: () => calls.filter(({ name }) => ['addLabels', 'removeLabel', 'createComment', 'updateComment'].includes(name)),
-  };
-}
+const { fixture } = require('./helpers.cjs');
 
 test('exclusive boundaries preserve the existing XS/S/M/L/XL policy', () => {
   for (const [lines, expected] of [[0, 'xs'], [14, 'xs'], [15, 's'], [99, 's'], [100, 'm'], [499, 'm'], [500, 'l'], [999, 'l'], [1000, 'xl'], [100000, 'xl']]) {
@@ -294,15 +233,15 @@ test('action metadata defaults match policy defaults', () => {
   assert.deepEqual(resolveOptions(inputs), DEFAULTS);
 });
 
-test('the actual composite script invokes the committed bundle with environment inputs', async () => {
+test('the actual composite script invokes the source with environment inputs', async () => {
   const metadata = yaml.load(readFileSync(path.join(__dirname, '../action.yaml'), 'utf8'));
-  const step = metadata.runs.steps[0];
+  const step = metadata.runs.steps.find((step) => step.id === 'label');
   assert.equal(step.uses, 'actions/github-script@v9');
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const script = new AsyncFunction('require', 'process', 'github', 'context', 'core', step.with.script);
   const f = fixture({ pages: [[file('file.tf', 15)]] });
   await script(require, { env: {
-    SIZE_LABELER_ACTION_PATH: path.resolve(__dirname, '..'),
+    SIZE_LABELER_RUNTIME_DIR: path.resolve(__dirname, '..'),
     SIZE_LABELER_INPUTS: JSON.stringify({ dry_run: true }),
   } }, f.github, f.context, f.core);
   assert.equal(f.outputs.label, 'size/S');

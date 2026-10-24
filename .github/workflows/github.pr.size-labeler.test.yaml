@@ -48,16 +48,11 @@ jobs:
         node-version: "24"
         package-manager-cache: false
 
-    - name: Install Build Dependencies
+    - name: Install Dependencies
       run: npm ci --ignore-scripts
 
     - name: Test
       run: npm test
-
-    - name: Check Bundle
-      run: |
-        npm run build
-        git diff --exit-code -- dist
 
     - name: Smoke Test Composite Action
       id: smoke

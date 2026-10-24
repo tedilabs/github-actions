@@ -1,6 +1,6 @@
 # GitHub - PR Size Labeler
 
-Label pull requests as XS, S, M, L, or XL using additions and deletions reported by GitHub. This composite action uses `actions/github-script@v9` and a bundled JavaScript implementation. It runs on AMD64 and ARM64 without Docker, checkout, `gh`, `jq`, or an npm install at runtime. Self-hosted runners need Actions Runner v2.327.1 or newer for Node 24.
+Label pull requests as XS, S, M, L, or XL using additions and deletions reported by GitHub. This composite action uses `actions/github-script@v9` and plain JavaScript. It sets up Node 24 and installs locked npm dependencies into a fresh runner-temporary directory before execution. It runs on AMD64 and ARM64 without Docker, checkout, `gh`, `jq`, or a build step. The caller’s package files and node_modules are not modified. Package installation requires registry access; npm lifecycle scripts are disabled. Self-hosted runners need Actions Runner v2.327.1 or newer for Node 24.
 
 ## Usage
 
@@ -139,10 +139,8 @@ From this action's directory, using Node 24:
 ```sh
 npm ci --ignore-scripts
 npm test
-npm run build
-git diff --exit-code -- dist
 ```
 
-Commit regenerated `dist/` when changing source or dependencies. The bundle includes the YAML and glob libraries and their license texts. Consumers never install these dependencies. The dedicated CI workflow runs behavior tests, a reproducible bundle check, and a read-only composite smoke test on AMD64 and ARM64.
+There are no generated JavaScript artifacts. Commit package-lock.json when updating dependencies. The language-neutral `tests/contract.json` scenarios also serve as the behavioral contract for the Python/uv alternative. The dedicated CI workflow runs behavior tests and a read-only composite smoke test, including runtime dependency installation, on AMD64 and ARM64.
 
 Potential follow-ups are file-count thresholds and `.gitattributes` generated-file exclusion. They change the classification policy or add config parsing beyond the current requirement, so this action initially keeps line-based grading and explicit globs.

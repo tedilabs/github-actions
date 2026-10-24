@@ -1,5 +1,5 @@
 name: GitHub - PR Size Labeler
-description: Label pull requests by changed lines, with YAML configuration and independent deletion filters. Runs without Docker on AMD64 and ARM64.
+description: Label pull requests by changed lines, with YAML configuration and independent deletion filters. Installs locked npm dependencies at runtime on AMD64 and ARM64.
 
 
 inputs:
@@ -122,15 +122,34 @@ runs:
   using: composite
 
   steps:
+  - name: Set up Node.js
+    uses: actions/setup-node@v7
+    with:
+      node-version: "24"
+      package-manager-cache: false
+
+  - name: Install Action Dependencies
+    id: dependencies
+    shell: bash
+    env:
+      SIZE_LABELER_ACTION_PATH: ${{ github.action_path }}
+    run: |
+      runtime_dir="$(mktemp -d "$RUNNER_TEMP/pr-size-labeler.XXXXXX")"
+      cp "$SIZE_LABELER_ACTION_PATH/package.json" "$SIZE_LABELER_ACTION_PATH/package-lock.json" "$runtime_dir/"
+      cp -R "$SIZE_LABELER_ACTION_PATH/src" "$runtime_dir/src"
+      cd "$runtime_dir"
+      npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+      echo "runtime_dir=$runtime_dir" >> "$GITHUB_OUTPUT"
+
   - name: Label Pull Request Size
     id: label
     uses: actions/github-script@v9
     env:
-      SIZE_LABELER_ACTION_PATH: ${{ github.action_path }}
+      SIZE_LABELER_RUNTIME_DIR: ${{ steps.dependencies.outputs.runtime_dir }}
       SIZE_LABELER_INPUTS: ${{ toJSON(inputs) }}
     with:
       github-token: ${{ inputs.GITHUB_TOKEN || github.token }}
       base-url: ${{ inputs.github_api_url }}
       script: |
-        const { run } = require(`${process.env.SIZE_LABELER_ACTION_PATH}/dist/index.cjs`);
+        const { run } = require(`${process.env.SIZE_LABELER_RUNTIME_DIR}/src/index.cjs`);
         await run({ github, context, core, inputs: JSON.parse(process.env.SIZE_LABELER_INPUTS) });

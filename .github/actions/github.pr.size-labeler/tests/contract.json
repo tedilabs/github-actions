@@ -1,0 +1,1158 @@
+[
+  {
+    "name": "boundary 0",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 0,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "xs",
+      "label": "size/XS",
+      "changed_lines": 0,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 14",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 14,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "xs",
+      "label": "size/XS",
+      "changed_lines": 14,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 15",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 15,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "s",
+      "label": "size/S",
+      "changed_lines": 15,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 99",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 99,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "s",
+      "label": "size/S",
+      "changed_lines": 99,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 100",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 100,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "m",
+      "label": "size/M",
+      "changed_lines": 100,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 499",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 499,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "m",
+      "label": "size/M",
+      "changed_lines": 499,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 500",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 500,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "l",
+      "label": "size/L",
+      "changed_lines": 500,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 999",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 999,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "l",
+      "label": "size/L",
+      "changed_lines": 999,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "boundary 1000",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "size": "xl",
+      "label": "size/XL",
+      "changed_lines": 1000,
+      "count_complete": true
+    }
+  },
+  {
+    "name": "deletion switches True/False",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 10,
+            "deletions": 20,
+            "status": "modified"
+          },
+          {
+            "filename": "gone.tf",
+            "additions": 0,
+            "deletions": 100,
+            "status": "removed"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "ignore_file_deletions": true,
+      "ignore_line_deletions": false
+    },
+    "outputs": {
+      "changed_lines": 30,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "deletion switches False/False",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 10,
+            "deletions": 20,
+            "status": "modified"
+          },
+          {
+            "filename": "gone.tf",
+            "additions": 0,
+            "deletions": 100,
+            "status": "removed"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "ignore_file_deletions": false,
+      "ignore_line_deletions": false
+    },
+    "outputs": {
+      "changed_lines": 130,
+      "changed_files": 2
+    }
+  },
+  {
+    "name": "deletion switches True/True",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 10,
+            "deletions": 20,
+            "status": "modified"
+          },
+          {
+            "filename": "gone.tf",
+            "additions": 0,
+            "deletions": 100,
+            "status": "removed"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "ignore_file_deletions": true,
+      "ignore_line_deletions": true
+    },
+    "outputs": {
+      "changed_lines": 10,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "deletion switches False/True",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 10,
+            "deletions": 20,
+            "status": "modified"
+          },
+          {
+            "filename": "gone.tf",
+            "additions": 0,
+            "deletions": 100,
+            "status": "removed"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "ignore_file_deletions": false,
+      "ignore_line_deletions": true
+    },
+    "outputs": {
+      "changed_lines": 10,
+      "changed_files": 2
+    }
+  },
+  {
+    "name": "glob **/*.lock",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.lock",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "pkg/a.lock",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": ".cache/a.lock",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "**/*.lock"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob *.lock",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.lock",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "pkg/a.lock",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": ".hidden.lock",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "*.lock"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob docs/**",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "docs/a.md",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "docs/sub/b.md",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "main.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "docs/**"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob **/*.{json,yaml}",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.json",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "b.yaml",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "sub/c.json",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "main.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "**/*.{json,yaml}"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob **/@(a|b).tf",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "sub/b.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "c.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "**/@(a|b).tf"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob file?.[jt]s",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "file1.js",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "file2.ts",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "file22.js",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "file?.[jt]s"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob \"docs/a b.md\"",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "docs/a b.md",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "docs/other.md",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "\"docs/a b.md\""
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "glob !**/*.tf",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "readme.md",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "sub/a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "!**/*.tf"
+    },
+    "outputs": {
+      "changed_lines": 2,
+      "changed_files": 2
+    }
+  },
+  {
+    "name": "glob [\"literal\"]",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "file.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "[\"literal\"]"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "all file pages",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "first.tf",
+            "additions": 0,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ],
+        [
+          {
+            "filename": "last.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "changed_files": 2,
+      "changed_lines": 1000,
+      "size": "xl"
+    }
+  },
+  {
+    "name": "empty PR",
+    "fixture": {
+      "pages": []
+    },
+    "inputs": {},
+    "outputs": {
+      "changed_files": 0,
+      "changed_lines": 0,
+      "size": "xs"
+    }
+  },
+  {
+    "name": "renamed and binary",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "new.tf",
+            "additions": 5,
+            "deletions": 2,
+            "status": "renamed"
+          },
+          {
+            "filename": "image.png",
+            "additions": 0,
+            "deletions": 0,
+            "status": "added"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "changed_files": 2,
+      "changed_lines": 7
+    }
+  },
+  {
+    "name": "config precedence",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yaml": "xs_max_size: 5\nignore_file_deletions: false",
+        ".github/size-labeler.yml": "xs_max_size: 20"
+      }
+    },
+    "inputs": {
+      "xs_max_size": "30"
+    },
+    "outputs": {
+      "label": "size/S",
+      "config_file": ".github/size-labeler.yaml"
+    }
+  },
+  {
+    "name": "yml fallback",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "xs_max_size: 5"
+      }
+    },
+    "inputs": {},
+    "outputs": {
+      "label": "size/S",
+      "config_file": ".github/size-labeler.yml"
+    }
+  },
+  {
+    "name": "explicit config",
+    "fixture": {
+      "config": {
+        "config/size.yml": "xs_label: tiny"
+      }
+    },
+    "inputs": {
+      "config_file": "config/size.yml"
+    },
+    "outputs": {
+      "label": "tiny",
+      "config_file": "config/size.yml"
+    }
+  },
+  {
+    "name": "missing explicit config",
+    "fixture": {},
+    "inputs": {
+      "config_file": "missing.yml"
+    },
+    "error": true
+  },
+  {
+    "name": "empty config",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "# no overrides"
+      }
+    },
+    "inputs": {},
+    "outputs": {
+      "label": "size/XS"
+    }
+  },
+  {
+    "name": "reject duplicate",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "xs_max_size: 5\nxs_max_size: 6"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject multi-document",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "{}\n---\n{}"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject unknown",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "unknown: true"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject token",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "GITHUB_TOKEN: anything"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject invalid YAML",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "xs_max_size: ["
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject null",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "null"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject bad threshold",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "xs_max_size: 100"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject bad boolean",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "dry_run: yes"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "reject duplicate labels",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "xs_label: size/S"
+      }
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "preserve foreign labels",
+    "fixture": {
+      "labels": [
+        "size/L",
+        "size/manual",
+        "bug"
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "removed_labels": "[\"size/L\"]"
+    },
+    "writes": [
+      {
+        "method": "addLabels",
+        "labels": [
+          "size/XS"
+        ]
+      },
+      {
+        "method": "removeLabel",
+        "name": "size/L"
+      }
+    ]
+  },
+  {
+    "name": "replace foreign labels",
+    "fixture": {
+      "labels": [
+        "size/L",
+        "SIZE/manual",
+        "bug"
+      ]
+    },
+    "inputs": {
+      "overwrite_other_size_labels": true
+    },
+    "outputs": {
+      "removed_labels": "[\"size/L\",\"SIZE/manual\"]"
+    }
+  },
+  {
+    "name": "custom prefix",
+    "fixture": {
+      "labels": [
+        "size/L",
+        "review/manual",
+        "size/manual",
+        "bug"
+      ]
+    },
+    "inputs": {
+      "overwrite_other_size_labels": true,
+      "size_label_prefix": "review/"
+    },
+    "outputs": {
+      "removed_labels": "[\"size/L\",\"review/manual\"]"
+    }
+  },
+  {
+    "name": "idempotent case insensitive",
+    "fixture": {
+      "labels": [
+        "SIZE/xs",
+        "bug"
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "added_labels": "[]",
+      "removed_labels": "[]"
+    },
+    "writes": []
+  },
+  {
+    "name": "dry run XL",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/S"
+      ]
+    },
+    "inputs": {
+      "dry_run": true,
+      "fail_if_xl": true,
+      "message_if_xl": "warning"
+    },
+    "outputs": {
+      "size": "xl",
+      "removed_labels": "[\"size/S\"]",
+      "dry_run": true
+    },
+    "writes": []
+  },
+  {
+    "name": "config enables dry run",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "dry_run: true"
+      }
+    },
+    "inputs": {
+      "dry_run": false
+    },
+    "outputs": {
+      "dry_run": true
+    },
+    "writes": []
+  },
+  {
+    "name": "config disables dry run",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "dry_run: false"
+      }
+    },
+    "inputs": {
+      "dry_run": true
+    },
+    "outputs": {
+      "dry_run": false
+    },
+    "writes": [
+      {
+        "labels": [
+          "size/XS"
+        ],
+        "method": "addLabels"
+      }
+    ]
+  },
+  {
+    "name": "definite XL truncation",
+    "fixture": {
+      "changedFiles": 3001,
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "outputs": {
+      "count_complete": false,
+      "size": "xl"
+    }
+  },
+  {
+    "name": "ambiguous truncation",
+    "fixture": {
+      "changedFiles": 3001,
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 999,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "stale PR",
+    "fixture": {
+      "stale": true
+    },
+    "inputs": {},
+    "error": true
+  },
+  {
+    "name": "XL comment and failure",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ]
+    },
+    "inputs": {
+      "message_if_xl": "warning",
+      "fail_if_xl": true
+    },
+    "writes": [
+      {
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nwarning",
+        "method": "createComment"
+      }
+    ],
+    "failure": true
+  },
+  {
+    "name": "XL unchanged comment",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "comments": [
+        {
+          "id": 1,
+          "user": {
+            "login": "github-actions[bot]"
+          },
+          "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nwarning"
+        }
+      ]
+    },
+    "inputs": {
+      "message_if_xl": "warning"
+    },
+    "writes": []
+  },
+  {
+    "name": "XL foreign comment",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "comments": [
+        {
+          "id": 1,
+          "user": {
+            "login": "other"
+          },
+          "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nwarning"
+        }
+      ]
+    },
+    "inputs": {
+      "message_if_xl": "warning"
+    },
+    "writes": [
+      {
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nwarning",
+        "method": "createComment"
+      }
+    ]
+  },
+  {
+    "name": "XL update comment",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "main.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "comments": [
+        {
+          "id": 1,
+          "user": {
+            "login": "github-actions[bot]"
+          },
+          "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nold"
+        }
+      ]
+    },
+    "inputs": {
+      "message_if_xl": "warning"
+    },
+    "writes": [
+      {
+        "comment_id": 1,
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nwarning",
+        "method": "updateComment"
+      }
+    ]
+  }
+]
