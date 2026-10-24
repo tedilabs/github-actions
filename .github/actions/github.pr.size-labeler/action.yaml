@@ -6,7 +6,7 @@ inputs:
   config_file:
     required: false
     default: ""
-    description: "(Optional) Repository-relative YAML path at the PR base commit. When omitted, tries `.github/size-labelers.yaml`, then `.github/size-labeler.yml`. File values override matching action inputs. An explicitly requested missing file fails."
+    description: "(Optional) Repository-relative YAML path at the PR base commit. When omitted, tries `.github/size-labeler.yaml`, then `.github/size-labeler.yml`. File values override matching action inputs. An explicitly requested missing file fails."
   pr_number:
     required: false
     default: ""

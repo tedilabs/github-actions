@@ -17,7 +17,7 @@ const DEFAULTS = {
   message_if_xl: 'This PR has too many changes. Please make sure you are NOT addressing multiple issues with one PR.',
   dry_run: false,
 };
-const DEFAULT_PATHS = ['.github/size-labelers.yaml', '.github/size-labeler.yml'];
+const DEFAULT_PATHS = ['.github/size-labeler.yaml', '.github/size-labeler.yml'];
 const COMMENT_MARKER = '<!-- tedilabs:github.pr.size-labeler:xl -->';
 
 function parseConfig(text) {

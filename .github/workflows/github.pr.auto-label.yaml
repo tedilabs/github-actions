@@ -46,7 +46,7 @@ on:
       pr_size_config_file:
         type: string
         required: false
-        description: "(Optional) Repository-relative config path at the PR base commit. When omitted, tries `.github/size-labelers.yaml`, then `.github/size-labeler.yml`. File settings override pr_size inputs."
+        description: "(Optional) Repository-relative config path at the PR base commit. When omitted, tries `.github/size-labeler.yaml`, then `.github/size-labeler.yml`. File settings override pr_size inputs."
       pr_size_overwrite_other_size_labels:
         type: boolean
         required: false

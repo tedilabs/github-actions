@@ -40,13 +40,13 @@ The existing `github.pr.auto-label.yaml` reusable workflow delegates to this act
 2. Action inputs.
 3. Values explicitly present in the configuration file.
 
-With an empty `config_file`, the action tries `.github/size-labelers.yaml` and then `.github/size-labeler.yml`. The first existing file wins; files are not merged. If neither exists, inputs are used. These filenames deliberately include the plural `size-labelers.yaml` and singular `size-labeler.yml`.
+With an empty `config_file`, the action tries `.github/size-labeler.yaml` and then `.github/size-labeler.yml`. The first existing file wins; files are not merged. If neither exists, inputs are used.
 
 Set `config_file: .github/custom-size.yaml` to read only that path. An explicitly selected missing file fails, while a missing auto-discovery file is optional. Invalid configuration and permission errors always fail before changes are made.
 
 Files use the same flat setting names as action inputs. Only policy settings in the table below can be overridden. `GITHUB_TOKEN`, `github_api_url`, `pr_number`, and `config_file` remain invocation inputs. Unknown keys, duplicate YAML keys, multiple documents, invalid booleans, and non-increasing thresholds fail validation. An empty file or `{}` applies no overrides.
 
-For example, `.github/size-labelers.yaml`:
+For example, `.github/size-labeler.yaml`:
 
 ```yaml
 xs_label: size/XS

@@ -5233,7 +5233,7 @@ var DEFAULTS = {
   message_if_xl: "This PR has too many changes. Please make sure you are NOT addressing multiple issues with one PR.",
   dry_run: false
 };
-var DEFAULT_PATHS = [".github/size-labelers.yaml", ".github/size-labeler.yml"];
+var DEFAULT_PATHS = [".github/size-labeler.yaml", ".github/size-labeler.yml"];
 var COMMENT_MARKER = "<!-- tedilabs:github.pr.size-labeler:xl -->";
 function parseConfig(text) {
   const documents = yaml.loadAll(text, { schema: yaml.JSON_SCHEMA });

@@ -105,10 +105,10 @@ test('legacy quoted/whitespace-separated patterns and YAML lists are supported',
 });
 
 test('autodiscovery reads the first available config from the PR base SHA', async () => {
-  const f = fixture({ config: { '.github/size-labelers.yaml': 'xs_max_size: 5', '.github/size-labeler.yml': 'xs_max_size: 20' } });
+  const f = fixture({ config: { '.github/size-labeler.yaml': 'xs_max_size: 5', '.github/size-labeler.yml': 'xs_max_size: 20' } });
   await f.execute();
   assert.equal(f.outputs.label, 'size/S');
-  assert.equal(f.outputs.config_file, '.github/size-labelers.yaml');
+  assert.equal(f.outputs.config_file, '.github/size-labeler.yaml');
   const reads = f.calls.filter((c) => c.name === 'getContent');
   assert.equal(reads.length, 1);
   assert.equal(reads[0].parameters.ref, 'trusted-base-sha');
@@ -232,7 +232,7 @@ test('dry run outputs intended changes without comments, mutations or XL failure
 });
 
 test('config may override dry_run and other behavior inputs', async () => {
-  const f = fixture({ config: { '.github/size-labelers.yaml': 'dry_run: true\noverwrite_other_size_labels: true' }, labels: ['size/manual'] });
+  const f = fixture({ config: { '.github/size-labeler.yaml': 'dry_run: true\noverwrite_other_size_labels: true' }, labels: ['size/manual'] });
   await f.execute({ dry_run: false });
   assert.equal(f.outputs.dry_run, true);
   assert.equal(f.outputs.removed_labels, '["size/manual"]');
