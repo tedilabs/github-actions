@@ -90,7 +90,7 @@ dry_run: false
 
 The defaults preserve the tedilabs workflow: XS is 0–14 lines, S is 15–99, M is 100–499, L is 500–999, and XL is 1000 or more. This action accepts the CodelyTV input names, including `GITHUB_TOKEN` and `github_api_url`, but defaults to tedilabs' uppercase labels, XS threshold of 15, and exclusion of deleted files. It does not copy CodelyTV's lowercase standalone defaults.
 
-Patterns match the current repository-relative filename, including dotfiles. Use `**/*.lock` for lockfiles at any depth. Quote whitespace-containing patterns in string inputs, or use a YAML list. Rename matching uses the new path. Patterns use picomatch glob syntax; they are not regular expressions. An excluded file contributes neither lines nor a file count. Binary-only changes with zero additions/deletions contribute zero lines. File counts are informational and do not affect the size grade.
+Glob rules use the same Bash-style semantics as the Python/uv alternative, including negated character classes and extglobs; neither implementation relies on picomatch-specific matching quirks. Patterns match the current repository-relative filename, including dotfiles. Use `**/*.lock` for lockfiles at any depth. Quote whitespace-containing patterns in string inputs, or use a YAML list. Rename matching uses the new path. Patterns use minimatch glob syntax; they are not regular expressions. An excluded file contributes neither lines nor a file count. Binary-only changes with zero additions/deletions contribute zero lines. File counts are informational and do not affect the size grade.
 
 Deletion examples for a PR modifying a file with 10 additions and 20 deletions, and deleting another 100-line file:
 

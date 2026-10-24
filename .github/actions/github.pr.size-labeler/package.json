@@ -6,6 +6,6 @@
   },
   "dependencies": {
     "js-yaml": "5.5.0",
-    "picomatch": "4.0.7"
+    "minimatch": "10.2.6"
   }
 }

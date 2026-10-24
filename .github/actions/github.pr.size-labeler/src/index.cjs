@@ -1,5 +1,5 @@
 const yaml = require('js-yaml');
-const picomatch = require('picomatch');
+const { minimatch } = require('minimatch');
 
 const SIZES = ['xs', 's', 'm', 'l', 'xl'];
 const DEFAULTS = {
@@ -107,7 +107,14 @@ function classify(lines, options) {
 }
 
 async function calculateSize(github, parameters, changedFiles, options) {
-  const ignored = picomatch(options.files_to_ignore, { dot: true });
+  const ignored = (name) => options.files_to_ignore.some((pattern) => {
+    let negate = false;
+    while (pattern.startsWith('!') && !pattern.startsWith('!(')) {
+      negate = !negate;
+      pattern = pattern.slice(1);
+    }
+    return minimatch(name, pattern, { dot: true, nonegate: true, nocomment: true }) !== negate;
+  });
   let lines = 0;
   let files = 0;
   let seen = 0;

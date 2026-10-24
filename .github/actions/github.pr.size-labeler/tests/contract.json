@@ -1154,5 +1154,455 @@
         "method": "updateComment"
       }
     ]
+  },
+  {
+    "name": "portable glob !(a).tf",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "ab.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "aa.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "b.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "!(a).tf"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "portable glob [!a].tf",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "b.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "c.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "[!a].tf"
+    },
+    "outputs": {
+      "changed_lines": 1,
+      "changed_files": 1
+    }
+  },
+  {
+    "name": "portable glob ./a.tf",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "./a.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "b.tf",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "./a.tf"
+    },
+    "outputs": {
+      "changed_lines": 2,
+      "changed_files": 2
+    }
+  },
+  {
+    "name": "portable glob a/**",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "a",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "a/b",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          },
+          {
+            "filename": "b",
+            "additions": 1,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ]
+    },
+    "inputs": {
+      "files_to_ignore": "a/**"
+    },
+    "outputs": {
+      "changed_lines": 2,
+      "changed_files": 2
+    }
+  },
+  {
+    "name": "JSON schema scalar True",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: True"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nTrue"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar FALSE",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: FALSE"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nFALSE"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar NULL",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: NULL"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\nNULL"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar ~",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: ~"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n~"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar 2026-10-24",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: 2026-10-24"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n2026-10-24"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar 015",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: 015"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n015"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar 0o17",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: 0o17"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n0o17"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar 0xF",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: 0xF"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n0xF"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar 1_000",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: 1_000"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n1_000"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar .inf",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: .inf"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n.inf"
+      }
+    ]
+  },
+  {
+    "name": "JSON schema scalar .nan",
+    "fixture": {
+      "pages": [
+        [
+          {
+            "filename": "large.tf",
+            "additions": 1000,
+            "deletions": 0,
+            "status": "modified"
+          }
+        ]
+      ],
+      "labels": [
+        "size/XL"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "message_if_xl: .nan"
+      }
+    },
+    "inputs": {},
+    "writes": [
+      {
+        "method": "createComment",
+        "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n.nan"
+      }
+    ]
   }
 ]
