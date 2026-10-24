@@ -1,0 +1,139 @@
+name: GitHub - PR Size Labeler
+description: Label pull requests by changed lines, with YAML configuration and independent deletion filters. Runs Python with uv and locked inline dependencies on AMD64 and ARM64.
+
+
+inputs:
+  config_file:
+    required: false
+    default: ""
+    description: "(Optional) Repository-relative YAML path at the PR base commit. When omitted, tries `.github/size-labeler.yaml`, then `.github/size-labeler.yml`. File values override matching action inputs. An explicitly requested missing file fails."
+  pr_number:
+    required: false
+    default: ""
+    description: "(Optional) The pull request number. Defaults to the PR event number. Required for workflow_dispatch or workflow_run."
+  GITHUB_TOKEN:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) GitHub token. Requires contents: read and pull-requests: write; a dry run only needs read permissions. Retains the CodelyTV input name."
+  github_api_url:
+    required: false
+    default: ${{ github.api_url }}
+    description: "(Optional) GitHub REST API URL, including GitHub Enterprise Server. Defaults to github.api_url."
+  xs_label:
+    required: false
+    default: size/XS
+    description: "(Optional) Label for XS pull requests. Defaults to `size/XS`."
+  xs_max_size:
+    required: false
+    default: "15"
+    description: "(Optional) Exclusive upper bound for XS. Defaults to `15` (0-14 lines)."
+  s_label:
+    required: false
+    default: size/S
+    description: "(Optional) Label for S pull requests. Defaults to `size/S`."
+  s_max_size:
+    required: false
+    default: "100"
+    description: "(Optional) Exclusive upper bound for S. Defaults to `100`."
+  m_label:
+    required: false
+    default: size/M
+    description: "(Optional) Label for M pull requests. Defaults to `size/M`."
+  m_max_size:
+    required: false
+    default: "500"
+    description: "(Optional) Exclusive upper bound for M. Defaults to `500`."
+  l_label:
+    required: false
+    default: size/L
+    description: "(Optional) Label for L pull requests. Defaults to `size/L`."
+  l_max_size:
+    required: false
+    default: "1000"
+    description: "(Optional) Exclusive upper bound for L. Values at or above this threshold are XL. Defaults to `1000`."
+  xl_label:
+    required: false
+    default: size/XL
+    description: "(Optional) Label for XL pull requests. Defaults to `size/XL`."
+  files_to_ignore:
+    required: false
+    default: ""
+    description: "(Optional) Whitespace-separated glob patterns, or a YAML list in the config file. Matches repository-relative paths, including dotfiles. Quote patterns containing spaces; use `**/*.lock` for nested lockfiles."
+  ignore_file_deletions:
+    required: false
+    default: "true"
+    description: "(Optional) Exclude completely removed files from both line and file counts. Defaults to `true`, matching the existing tedilabs workflow."
+  ignore_line_deletions:
+    required: false
+    default: "false"
+    description: "(Optional) Count additions only instead of additions plus deletions. Defaults to `false`."
+  overwrite_other_size_labels:
+    required: false
+    default: "false"
+    description: "(Optional) Also remove labels matching size_label_prefix outside the five configured labels. Defaults to `false` (preserve them). Ownership is by label name, not the actor that applied it."
+  size_label_prefix:
+    required: false
+    default: size/
+    description: "(Optional) Case-insensitive prefix identifying other size labels when overwrite_other_size_labels is true. Defaults to `size/`."
+  fail_if_xl:
+    required: false
+    default: "false"
+    description: "(Optional) Fail the step after labeling an XL PR. Defaults to `false`. Not enforced in dry_run mode."
+  message_if_xl:
+    required: false
+    default: This PR has too many changes. Please make sure you are NOT addressing multiple issues with one PR.
+    description: "(Optional) Sticky comment for an XL PR. An empty string disables commenting. Reuses this action's comment by the same token author; historical comments remain when the PR shrinks."
+  dry_run:
+    required: false
+    default: "false"
+    description: "(Optional) Calculate and output planned changes without modifying labels/comments or enforcing fail_if_xl. Defaults to `false`."
+
+outputs:
+  size:
+    value: ${{ steps.label.outputs.size }}
+    description: The calculated size, one of xs, s, m, l, xl.
+  label:
+    value: ${{ steps.label.outputs.label }}
+    description: The calculated label name.
+  changed_lines:
+    value: ${{ steps.label.outputs.changed_lines }}
+    description: Changed lines after exclusions; a lower bound if count_complete is false.
+  changed_files:
+    value: ${{ steps.label.outputs.changed_files }}
+    description: Included files after exclusions; a lower bound if count_complete is false.
+  count_complete:
+    value: ${{ steps.label.outputs.count_complete }}
+    description: Whether all changed files were counted. An incomplete count is accepted only when XL is certain.
+  config_file:
+    value: ${{ steps.label.outputs.config_file }}
+    description: The loaded repository-relative configuration path, or empty when none exists.
+  added_labels:
+    value: ${{ steps.label.outputs.added_labels }}
+    description: JSON array of labels to add; planned changes only in dry_run mode.
+  removed_labels:
+    value: ${{ steps.label.outputs.removed_labels }}
+    description: JSON array of labels to remove; planned changes only in dry_run mode.
+  dry_run:
+    value: ${{ steps.label.outputs.dry_run }}
+    description: The effective dry_run setting after configuration overrides.
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Set up uv
+    uses: astral-sh/setup-uv@v10
+    with:
+      version: "0.13.2"
+      python-version: "3.12"
+      enable-cache: false
+
+  - name: Label Pull Request Size
+    id: label
+    shell: bash
+    env:
+      SIZE_LABELER_ACTION_PATH: ${{ github.action_path }}
+      SIZE_LABELER_INPUTS: ${{ toJSON(inputs) }}
+      GITHUB_TOKEN: ${{ inputs.GITHUB_TOKEN || github.token }}
+    run: uv run --no-config --locked --script "$SIZE_LABELER_ACTION_PATH/size_labeler.py"
