@@ -43,6 +43,44 @@ on:
         required: false
         default: true
         description: "(Optional) Whether enabled `pr-size-labeler`. Defaults to `true`."
+      pr_size_config_file:
+        type: string
+        required: false
+        description: "(Optional) Repository-relative config path at the PR base commit. When omitted, tries `.github/size-labeler.yaml`, then `.github/size-labeler.yml`. File settings override pr_size inputs."
+      pr_size_overwrite_size_labels:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to overwrite existing configured size labels, including manually applied labels. When false, add a size label only if none of the configured labels exists. Defaults to `true`."
+      pr_size_files_to_ignore:
+        type: string
+        required: false
+        description: "(Optional) Whitespace-separated glob patterns excluded from size calculations."
+      pr_size_ignore_file_deletions:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Exclude completely removed files. Defaults to `true`."
+      pr_size_ignore_line_deletions:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Count additions only. Defaults to `false`."
+      pr_size_fail_if_xl:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Fail after labeling an XL PR. Defaults to `false`."
+      pr_size_message_if_xl:
+        type: string
+        required: false
+        default: "This PR has too many changes. Please make sure you are NOT addressing multiple issues with one PR."
+        description: "(Optional) Sticky comment for XL PRs. Set to an empty string to disable."
+      pr_size_dry_run:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Calculate size without modifying labels/comments or enforcing XL failure. Defaults to `false`."
       pr_size_xs_label:
         type: string
         required: false
@@ -101,6 +139,15 @@ on:
       labeler_all_labels:
         value: ${{ jobs.labeler.outputs.all_labels }}
         description: "A comma-separated list of all labels that the PR contains."
+      pr_size_label:
+        value: ${{ jobs.pr-size-labeler.outputs.label }}
+        description: "The calculated size label."
+      pr_size_changed_lines:
+        value: ${{ jobs.pr-size-labeler.outputs.changed_lines }}
+        description: "Included changed lines; a lower bound if pr_size_count_complete is false."
+      pr_size_count_complete:
+        value: ${{ jobs.pr-size-labeler.outputs.count_complete }}
+        description: "Whether all changed files were counted."
 
 
 jobs:
@@ -130,11 +177,21 @@ jobs:
     runs-on: ${{ fromJson(inputs.runs_on) }}
     if: ${{ inputs.pr_size_enabled }}
 
+    outputs:
+      label: ${{ steps.size-labeler.outputs.label }}
+      changed_lines: ${{ steps.size-labeler.outputs.changed_lines }}
+      count_complete: ${{ steps.size-labeler.outputs.count_complete }}
+
     steps:
     - name: Add PR Size Labels for PR
-      uses: codelytv/pr-size-labeler@v1
+      id: size-labeler
+      uses: tedilabs/github-actions/.github/actions/github.pr.size-labeler@main
       with:
-        GITHUB_TOKEN: ${{ secrets.token }}
+        github_token: ${{ secrets.token }}
+        config_file: ${{ inputs.pr_size_config_file }}
+        overwrite_size_labels: ${{ inputs.pr_size_overwrite_size_labels }}
+        files_to_ignore: ${{ inputs.pr_size_files_to_ignore }}
+        dry_run: ${{ inputs.pr_size_dry_run }}
         xs_label: ${{ inputs.pr_size_xs_label }}
         xs_max_size: ${{ inputs.pr_size_xs_max }}
         s_label: ${{ inputs.pr_size_s_label }}
@@ -144,10 +201,8 @@ jobs:
         l_label: ${{ inputs.pr_size_l_label }}
         l_max_size: ${{ inputs.pr_size_l_max }}
         xl_label: ${{ inputs.pr_size_xl_label }}
-        fail_if_xl: 'false'
-        message_if_xl: >
-          'This PR has too many changes.
-          Please make sure you are NOT addressing multiple issues with one PR.'
-        ignore_line_deletions: 'false'
-        ignore_file_deletions: 'true'
+        fail_if_xl: ${{ inputs.pr_size_fail_if_xl }}
+        message_if_xl: ${{ inputs.pr_size_message_if_xl }}
+        ignore_line_deletions: ${{ inputs.pr_size_ignore_line_deletions }}
+        ignore_file_deletions: ${{ inputs.pr_size_ignore_file_deletions }}
 

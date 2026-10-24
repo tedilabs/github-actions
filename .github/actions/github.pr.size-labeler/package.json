@@ -1,0 +1,11 @@
+{
+  "name": "github-pr-size-labeler",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs"
+  },
+  "dependencies": {
+    "js-yaml": "5.5.0",
+    "minimatch": "10.2.6"
+  }
+}
