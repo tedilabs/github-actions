@@ -1,5 +1,5 @@
 {
-  "name": "tedilabs-github-pr-size-labeler",
+  "name": "github-pr-size-labeler",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.cjs"

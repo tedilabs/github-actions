@@ -11,8 +11,7 @@ const DEFAULTS = {
   files_to_ignore: [],
   ignore_file_deletions: true,
   ignore_line_deletions: false,
-  overwrite_other_size_labels: false,
-  size_label_prefix: 'size/',
+  overwrite_size_labels: true,
   fail_if_xl: false,
   message_if_xl: 'This PR has too many changes. Please make sure you are NOT addressing multiple issues with one PR.',
   dry_run: false,
@@ -69,9 +68,6 @@ function resolveOptions(inputs = {}, config = {}) {
     previous = limit;
   }
   if (new Set(names).size !== names.length) throw new Error('Size labels must be distinct (case-insensitive).');
-  if (typeof options.size_label_prefix !== 'string' || !options.size_label_prefix.trim()) {
-    throw new Error('size_label_prefix must be a nonempty string.');
-  }
   if (typeof options.message_if_xl !== 'string') throw new Error('message_if_xl must be a string.');
   if (typeof options.files_to_ignore === 'string') {
     // Retain the legacy whitespace-separated input, including quoted patterns.
@@ -136,12 +132,13 @@ async function calculateSize(github, parameters, changedFiles, options) {
 
 function labelChanges(existing, desired, options) {
   const managed = new Set(SIZES.map((size) => options[`${size}_label`].toLowerCase()));
-  const prefix = options.size_label_prefix.toLowerCase();
+  if (!options.overwrite_size_labels && existing.some((name) => managed.has(name.toLowerCase()))) {
+    return { add: [], remove: [] };
+  }
   return {
     add: existing.some((name) => name.toLowerCase() === desired.toLowerCase()) ? [] : [desired],
     remove: existing.filter((name) => name.toLowerCase() !== desired.toLowerCase()
-      && (managed.has(name.toLowerCase())
-        || (options.overwrite_other_size_labels && name.toLowerCase().startsWith(prefix)))),
+      && managed.has(name.toLowerCase())),
   };
 }
 

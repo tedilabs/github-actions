@@ -47,16 +47,11 @@ on:
         type: string
         required: false
         description: "(Optional) Repository-relative config path at the PR base commit. When omitted, tries `.github/size-labeler.yaml`, then `.github/size-labeler.yml`. File settings override pr_size inputs."
-      pr_size_overwrite_other_size_labels:
+      pr_size_overwrite_size_labels:
         type: boolean
         required: false
-        default: false
-        description: "(Optional) Also remove other labels matching pr_size_label_prefix. The five configured size labels are always managed by name. Defaults to `false`."
-      pr_size_label_prefix:
-        type: string
-        required: false
-        default: "size/"
-        description: "(Optional) Prefix identifying other size labels when overwrite is enabled. Defaults to `size/`."
+        default: true
+        description: "(Optional) Whether to overwrite existing configured size labels, including manually applied labels. When false, add a size label only if none of the configured labels exists. Defaults to `true`."
       pr_size_files_to_ignore:
         type: string
         required: false
@@ -95,7 +90,7 @@ on:
         type: number
         required: false
         default: 15
-        description: "(Optional) Exclusive upper bound for XS-sized PRs. Defaults to `15`."
+        description: "(Optional) Maximum number of changes allowed for XS-sized PRs. Defaults to `15`."
       pr_size_s_label:
         type: string
         required: false
@@ -105,7 +100,7 @@ on:
         type: number
         required: false
         default: 100
-        description: "(Optional) Exclusive upper bound for S-sized PRs. Defaults to `100`."
+        description: "(Optional) Maximum number of changes allowed for S-sized PRs. Defaults to `100`."
       pr_size_m_label:
         type: string
         required: false
@@ -115,7 +110,7 @@ on:
         type: number
         required: false
         default: 500
-        description: "(Optional) Exclusive upper bound for M-sized PRs. Defaults to `500`."
+        description: "(Optional) Maximum number of changes allowed for M-sized PRs. Defaults to `500`."
       pr_size_l_label:
         type: string
         required: false
@@ -125,12 +120,12 @@ on:
         type: number
         required: false
         default: 1000
-        description: "(Optional) Exclusive upper bound for L-sized PRs. Defaults to `1000`."
+        description: "(Optional) Maximum number of changes allowed for L-sized PRs. Defaults to `1000`."
       pr_size_xl_label:
         type: string
         required: false
         default: "size/XL"
-        description: "(Optional) Label for PRs at or above `pr_size_l_max`. Defaults to `size/XL`."
+        description: "(Optional) A label for extra large-sized PRs. A PR will be labeled it if it exceeds the amount of changes defined in `pr_size_l_max`. Defaults to `size/XL`."
 
     secrets:
       token:
@@ -192,10 +187,9 @@ jobs:
       id: size-labeler
       uses: tedilabs/github-actions/.github/actions/github.pr.size-labeler@main
       with:
-        GITHUB_TOKEN: ${{ secrets.token }}
+        github_token: ${{ secrets.token }}
         config_file: ${{ inputs.pr_size_config_file }}
-        overwrite_other_size_labels: ${{ inputs.pr_size_overwrite_other_size_labels }}
-        size_label_prefix: ${{ inputs.pr_size_label_prefix }}
+        overwrite_size_labels: ${{ inputs.pr_size_overwrite_size_labels }}
         files_to_ignore: ${{ inputs.pr_size_files_to_ignore }}
         dry_run: ${{ inputs.pr_size_dry_run }}
         xs_label: ${{ inputs.pr_size_xs_label }}

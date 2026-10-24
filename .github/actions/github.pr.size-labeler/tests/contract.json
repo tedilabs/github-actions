@@ -778,7 +778,7 @@
     "name": "reject token",
     "fixture": {
       "config": {
-        ".github/size-labeler.yml": "GITHUB_TOKEN: anything"
+        ".github/size-labeler.yml": "github_token: secret"
       }
     },
     "inputs": {},
@@ -861,7 +861,7 @@
     ]
   },
   {
-    "name": "replace foreign labels",
+    "name": "overwrite configured labels only",
     "fixture": {
       "labels": [
         "size/L",
@@ -870,14 +870,14 @@
       ]
     },
     "inputs": {
-      "overwrite_other_size_labels": true
+      "overwrite_size_labels": true
     },
     "outputs": {
-      "removed_labels": "[\"size/L\",\"SIZE/manual\"]"
+      "removed_labels": "[\"size/L\"]"
     }
   },
   {
-    "name": "custom prefix",
+    "name": "custom configured label name",
     "fixture": {
       "labels": [
         "size/L",
@@ -887,11 +887,13 @@
       ]
     },
     "inputs": {
-      "overwrite_other_size_labels": true,
-      "size_label_prefix": "review/"
+      "overwrite_size_labels": true,
+      "xs_label": "tiny"
     },
     "outputs": {
-      "removed_labels": "[\"size/L\",\"review/manual\"]"
+      "label": "tiny",
+      "added_labels": "[\"tiny\"]",
+      "removed_labels": "[\"size/L\"]"
     }
   },
   {
@@ -1614,5 +1616,80 @@
     },
     "inputs": {},
     "error": true
+  },
+  {
+    "name": "preserve existing configured label",
+    "fixture": {
+      "labels": [
+        "size/L",
+        "size/manual",
+        "bug"
+      ]
+    },
+    "inputs": {
+      "overwrite_size_labels": false
+    },
+    "outputs": {
+      "label": "size/XS",
+      "added_labels": "[]",
+      "removed_labels": "[]"
+    },
+    "writes": []
+  },
+  {
+    "name": "preserve multiple configured labels",
+    "fixture": {
+      "labels": [
+        "SIZE/xs",
+        "size/L"
+      ]
+    },
+    "inputs": {
+      "overwrite_size_labels": false
+    },
+    "outputs": {
+      "added_labels": "[]",
+      "removed_labels": "[]"
+    },
+    "writes": []
+  },
+  {
+    "name": "first label with overwrite disabled",
+    "fixture": {
+      "labels": [
+        "size/manual",
+        "bug"
+      ]
+    },
+    "inputs": {
+      "overwrite_size_labels": false
+    },
+    "writes": [
+      {
+        "method": "addLabels",
+        "labels": [
+          "size/XS"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "file disables overwrite input",
+    "fixture": {
+      "labels": [
+        "size/L"
+      ],
+      "config": {
+        ".github/size-labeler.yml": "overwrite_size_labels: false"
+      }
+    },
+    "inputs": {
+      "overwrite_size_labels": true
+    },
+    "outputs": {
+      "added_labels": "[]",
+      "removed_labels": "[]"
+    },
+    "writes": []
   }
 ]

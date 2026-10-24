@@ -27,13 +27,13 @@ test('YAML values override only provided inputs, including false and empty messa
 });
 
 test('invalid YAML, duplicate keys, unknown keys and credential overrides are rejected', () => {
-  for (const text of ['[xs, s]', 'xs_max_size: [', 'xs_max_size: 1\nxs_max_size: 2', 'ignore_deleted_lines: true', 'GITHUB_TOKEN: secret', 'github_api_url: https://example.com', 'config_file: other.yaml', 'pr_number: 99']) {
+  for (const text of ['[xs, s]', 'xs_max_size: [', 'xs_max_size: 1\nxs_max_size: 2', 'ignore_deleted_lines: true', 'github_token: secret', 'size_label_prefix: size/', 'overwrite_other_size_labels: true', 'github_api_url: https://example.com', 'config_file: other.yaml', 'pr_number: 99']) {
     assert.throws(() => parseConfig(text), undefined, text);
   }
 });
 
 test('reject invalid thresholds, booleans and duplicate labels before API writes', () => {
-  for (const invalid of [{ xs_max_size: 0 }, { xs_max_size: 100 }, { l_max_size: -1 }, { s_max_size: 1.5 }, { m_max_size: true }, { xs_label: 'size/S' }, { xs_label: '' }, { ignore_line_deletions: 'yes' }, { size_label_prefix: '' }, { message_if_xl: null }, { files_to_ignore: [1] }]) {
+  for (const invalid of [{ xs_max_size: 0 }, { xs_max_size: 100 }, { l_max_size: -1 }, { s_max_size: 1.5 }, { m_max_size: true }, { xs_label: 'size/S' }, { xs_label: '' }, { ignore_line_deletions: 'yes' }, { overwrite_size_labels: 'yes' }, { message_if_xl: null }, { files_to_ignore: [1] }]) {
     assert.throws(() => resolveOptions({}, invalid));
   }
 });
@@ -142,11 +142,33 @@ test('configured labels are replaced, foreign size labels and unrelated labels a
   assert.deepEqual(labelChanges(['SIZE/s', 'size/XS'], 'size/S', options()), { add: [], remove: ['size/XS'] });
 });
 
-test('overwrite applies only to configured labels and the selected size prefix', () => {
-  const configured = options({ xs_label: 'tiny', overwrite_other_size_labels: true, size_label_prefix: 'review/' });
+test('overwrite changes only configured label names, including custom names', () => {
+  const configured = options({ xs_label: 'tiny', overwrite_size_labels: true });
   assert.deepEqual(labelChanges(['tiny', 'review/manual', 'size/manual', 'bug'], 'size/M', configured), {
-    add: ['size/M'], remove: ['tiny', 'review/manual'],
+    add: ['size/M'], remove: ['tiny'],
   });
+});
+
+test('overwrite disabled preserves existing configured labels regardless of their author', () => {
+  const configured = options({ overwrite_size_labels: false });
+  assert.deepEqual(labelChanges(['SIZE/l', 'size/manual', 'bug'], 'size/S', configured), { add: [], remove: [] });
+  assert.deepEqual(labelChanges(['size/S', 'size/L'], 'size/S', configured), { add: [], remove: [] });
+});
+
+test('overwrite disabled still adds the first configured label and preserves unrelated names', () => {
+  assert.deepEqual(labelChanges(['size/manual', 'bug'], 'size/S', options({ overwrite_size_labels: false })), {
+    add: ['size/S'], remove: [],
+  });
+});
+
+test('preserving an existing label does not change calculated outputs or XL failure policy', async () => {
+  const f = fixture({ pages: [[file('big.tf', 1000)]], labels: ['size/S'] });
+  await f.execute({ overwrite_size_labels: false, fail_if_xl: true, message_if_xl: '' });
+  assert.equal(f.outputs.label, 'size/XL');
+  assert.equal(f.outputs.added_labels, '[]');
+  assert.equal(f.outputs.removed_labels, '[]');
+  assert.deepEqual(f.writes(), []);
+  assert.equal(f.failures.length, 1);
 });
 
 test('normal run adds the target before removing obsolete labels and is idempotent', async () => {
@@ -171,10 +193,11 @@ test('dry run outputs intended changes without comments, mutations or XL failure
 });
 
 test('config may override dry_run and other behavior inputs', async () => {
-  const f = fixture({ config: { '.github/size-labeler.yaml': 'dry_run: true\noverwrite_other_size_labels: true' }, labels: ['size/manual'] });
-  await f.execute({ dry_run: false });
+  const f = fixture({ config: { '.github/size-labeler.yaml': 'dry_run: true\noverwrite_size_labels: false' }, labels: ['size/L', 'size/manual'] });
+  await f.execute({ dry_run: false, overwrite_size_labels: true });
   assert.equal(f.outputs.dry_run, true);
-  assert.equal(f.outputs.removed_labels, '["size/manual"]');
+  assert.equal(f.outputs.added_labels, '[]');
+  assert.equal(f.outputs.removed_labels, '[]');
   assert.deepEqual(f.writes(), []);
 });
 
