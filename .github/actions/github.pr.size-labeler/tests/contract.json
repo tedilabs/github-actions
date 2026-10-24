@@ -1604,5 +1604,15 @@
         "body": "<!-- tedilabs:github.pr.size-labeler:xl -->\n.nan"
       }
     ]
+  },
+  {
+    "name": "reject explicit YAML 1.1 boolean",
+    "fixture": {
+      "config": {
+        ".github/size-labeler.yml": "dry_run: !!bool True"
+      }
+    },
+    "inputs": {},
+    "error": true
   }
 ]
