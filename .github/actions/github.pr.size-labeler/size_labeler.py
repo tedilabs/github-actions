@@ -47,6 +47,11 @@ class ConfigResolver(VersionedResolver):
 def parse_config(text):
     parser = YAML(typ="safe", pure=True)
     parser.Resolver = ConfigResolver
+    def boolean(constructor, node):
+        if node.value not in ("true", "false"):
+            raise ValueError("Explicit YAML booleans must be true or false.")
+        return node.value == "true"
+    parser.constructor.yaml_constructors = {**parser.constructor.yaml_constructors, "tag:yaml.org,2002:bool": boolean}
     documents = list(parser.load_all(text))
     if len(documents) > 1:
         raise ValueError("Configuration must contain only one YAML document.")

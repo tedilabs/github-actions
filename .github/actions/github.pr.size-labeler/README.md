@@ -143,7 +143,7 @@ uv run --no-config --no-project --python 3.12 --with-requirements /tmp/size-labe
 
 Update versions in the script's PEP 723 metadata and run `uv lock --script size_labeler.py` when updating dependencies. Commit `size_labeler.py.lock`; `--locked` rejects stale metadata rather than silently resolving new versions during action execution. No generated source files are committed.
 
-`tests/contract.json` is byte-identical to the JavaScript alternative's contract: both implementations run the same 68 scenarios for policy decisions, outputs, label/comment changes, configuration, glob/YAML semantics, and failure conditions. Python-specific tests additionally exercise the actual PyGithub SDK with paginated transport responses, Enterprise API paths, output serialization, and validation. CI runs the tests and the real composite's read-only smoke test on Linux AMD64 and ARM64. Live writes are tested through stubs, not performed by the smoke test.
+`tests/contract.json` is byte-identical to the JavaScript alternative's contract: both implementations run the same 69 scenarios for policy decisions, outputs, label/comment changes, configuration, glob/YAML semantics, and failure conditions. Python-specific tests additionally exercise the actual PyGithub SDK with paginated transport responses, Enterprise API paths, output serialization, and validation. CI runs the tests and the real composite's read-only smoke test on Linux AMD64 and ARM64. Live writes are tested through stubs, not performed by the smoke test.
 
 ## Dependency decisions
 
