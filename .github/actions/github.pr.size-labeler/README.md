@@ -44,20 +44,26 @@ With an empty `config_file`, the action tries `.github/size-labeler.yaml` and th
 
 Set `config_file: .github/custom-size.yaml` to read only that path. An explicitly selected missing file fails, while a missing auto-discovery file is optional. Invalid configuration and permission errors always fail before changes are made.
 
-Files use the same flat setting names as action inputs. Only policy settings in the table below can be overridden. `github_token`, `github_api_url`, `pr_number`, and `config_file` remain invocation inputs. Unknown keys, duplicate YAML keys, multiple documents, invalid booleans, and non-increasing thresholds fail validation. An empty file or `{}` applies no overrides.
+Files group size settings under `sizes`, keyed by `xs`, `s`, `m`, `l`, and `xl`. Each size accepts `label`; XS through L also accept `max_size`. XL has no upper bound and rejects `max_size`. Other policy settings remain top-level keys. Action inputs keep their flat names; flat size keys such as `xs_label` and `xs_max_size` are not accepted in config files. `github_token`, `github_api_url`, `pr_number`, and `config_file` remain invocation inputs. Unknown keys, duplicate YAML keys, multiple documents, invalid booleans, and non-increasing thresholds fail validation. An empty file or `{}` applies no overrides.
 
 For example, `.github/size-labeler.yaml`:
 
 ```yaml
-xs_label: size/XS
-xs_max_size: 15
-s_label: size/S
-s_max_size: 100
-m_label: size/M
-m_max_size: 500
-l_label: size/L
-l_max_size: 1000
-xl_label: size/XL
+sizes:
+  xs:
+    label: size/XS
+    max_size: 15
+  s:
+    label: size/S
+    max_size: 100
+  m:
+    label: size/M
+    max_size: 500
+  l:
+    label: size/L
+    max_size: 1000
+  xl:
+    label: size/XL
 
 files_to_ignore:
 - "**/*.lock"
@@ -71,6 +77,18 @@ fail_if_xl: false
 message_if_xl: Please consider splitting this PR into smaller changes.
 dry_run: false
 ```
+
+Overrides apply per field: omitted sizes and fields retain their action input or built-in default. For example, this changes only the XS threshold and XL label:
+
+```yaml
+sizes:
+  xs:
+    max_size: 20
+  xl:
+    label: review/too-large
+```
+
+`max_size` is exclusive: with the defaults, XS is below 15 and XL is at least 1000. Size order is always XS → S → M → L → XL, regardless of YAML key order. `sizes: {}` and `sizes: {xs: {}}` apply no size overrides; null, scalar, and list values are invalid for these mappings. Unknown size names and fields fail validation.
 
 ## Policy inputs
 

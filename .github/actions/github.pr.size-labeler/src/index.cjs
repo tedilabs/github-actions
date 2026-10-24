@@ -26,10 +26,32 @@ function parseConfig(text) {
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
     throw new Error('Size labeler configuration must be a YAML mapping.');
   }
-  for (const key of Object.keys(config)) {
-    if (!Object.hasOwn(DEFAULTS, key)) throw new Error(`Unknown configuration key: ${key}`);
+  const overrides = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (key === 'sizes') {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('sizes must be a YAML mapping.');
+      }
+      for (const [size, settings] of Object.entries(value)) {
+        if (!SIZES.includes(size)) throw new Error(`Unknown configuration key: sizes.${size}`);
+        if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
+          throw new Error(`sizes.${size} must be a YAML mapping.`);
+        }
+        for (const [field, setting] of Object.entries(settings)) {
+          if (field !== 'label' && !(field === 'max_size' && size !== 'xl')) {
+            throw new Error(`Unknown configuration key: sizes.${size}.${field}`);
+          }
+          overrides[`${size}_${field}`] = setting;
+        }
+      }
+    } else {
+      if (!Object.hasOwn(DEFAULTS, key) || SIZES.some((size) => key.startsWith(`${size}_`))) {
+        throw new Error(`Unknown configuration key: ${key}`);
+      }
+      overrides[key] = value;
+    }
   }
-  return config;
+  return overrides;
 }
 
 function resolveOptions(inputs = {}, config = {}) {

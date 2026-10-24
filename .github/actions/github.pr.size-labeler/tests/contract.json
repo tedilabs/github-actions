@@ -684,8 +684,8 @@
     "name": "config precedence",
     "fixture": {
       "config": {
-        ".github/size-labeler.yaml": "xs_max_size: 5\nignore_file_deletions: false",
-        ".github/size-labeler.yml": "xs_max_size: 20"
+        ".github/size-labeler.yaml": "sizes:\n  xs:\n    max_size: 5\nignore_file_deletions: false",
+        ".github/size-labeler.yml": "sizes:\n  xs:\n    max_size: 20"
       }
     },
     "inputs": {
@@ -700,7 +700,7 @@
     "name": "yml fallback",
     "fixture": {
       "config": {
-        ".github/size-labeler.yml": "xs_max_size: 5"
+        ".github/size-labeler.yml": "sizes:\n  xs:\n    max_size: 5"
       }
     },
     "inputs": {},
@@ -713,7 +713,7 @@
     "name": "explicit config",
     "fixture": {
       "config": {
-        "config/size.yml": "xs_label: tiny"
+        "config/size.yml": "sizes:\n  xs:\n    label: tiny"
       }
     },
     "inputs": {
@@ -748,7 +748,7 @@
     "name": "reject duplicate",
     "fixture": {
       "config": {
-        ".github/size-labeler.yml": "xs_max_size: 5\nxs_max_size: 6"
+        ".github/size-labeler.yml": "sizes:\n  xs:\n    max_size: 5\n    max_size: 6"
       }
     },
     "inputs": {},
@@ -788,7 +788,7 @@
     "name": "reject invalid YAML",
     "fixture": {
       "config": {
-        ".github/size-labeler.yml": "xs_max_size: ["
+        ".github/size-labeler.yml": "sizes:\n  xs:\n    max_size: ["
       }
     },
     "inputs": {},
@@ -808,7 +808,7 @@
     "name": "reject bad threshold",
     "fixture": {
       "config": {
-        ".github/size-labeler.yml": "xs_max_size: 100"
+        ".github/size-labeler.yml": "sizes:\n  xs:\n    max_size: 100"
       }
     },
     "inputs": {},
@@ -828,7 +828,7 @@
     "name": "reject duplicate labels",
     "fixture": {
       "config": {
-        ".github/size-labeler.yml": "xs_label: size/S"
+        ".github/size-labeler.yml": "sizes:\n  xs:\n    label: size/S"
       }
     },
     "inputs": {},

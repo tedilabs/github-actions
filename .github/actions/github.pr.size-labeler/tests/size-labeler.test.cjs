@@ -18,12 +18,64 @@ test('exclusive boundaries preserve the existing XS/S/M/L/XL policy', () => {
 });
 
 test('YAML values override only provided inputs, including false and empty message', () => {
-  const resolved = resolveOptions({ xs_max_size: '25', s_max_size: '200', ignore_file_deletions: 'true', message_if_xl: 'warning' },
-    parseConfig('xs_max_size: 30\nignore_file_deletions: false\nmessage_if_xl: ""'));
+  const resolved = resolveOptions({ xs_label: 'tiny', xs_max_size: '25', s_max_size: '200', xl_label: 'huge', ignore_file_deletions: 'true', message_if_xl: 'warning' },
+    parseConfig('sizes: {xs: {max_size: 30}, xl: {label: review/too-large}}\nignore_file_deletions: false\nmessage_if_xl: ""'));
   assert.equal(resolved.xs_max_size, 30);
+  assert.equal(resolved.xs_label, 'tiny');
   assert.equal(resolved.s_max_size, 200);
+  assert.equal(resolved.m_max_size, 500);
+  assert.equal(resolved.xl_label, 'review/too-large');
   assert.equal(resolved.ignore_file_deletions, false);
   assert.equal(resolved.message_if_xl, '');
+});
+
+test('nested size settings apply all labels and thresholds regardless of key order', () => {
+  const config = parseConfig(`sizes:
+  xl: {label: huge}
+  l: {label: large, max_size: 40}
+  m: {label: medium, max_size: 30}
+  s: {label: small, max_size: 20}
+  xs: {label: tiny, max_size: 10}
+`);
+  const resolved = resolveOptions({}, config);
+  for (const [lines, size, label] of [[9, 'xs', 'tiny'], [10, 's', 'small'], [20, 'm', 'medium'], [30, 'l', 'large'], [40, 'xl', 'huge']]) {
+    assert.equal(classify(lines, resolved), size);
+    assert.equal(resolved[`${size}_label`], label);
+  }
+});
+
+test('empty size mappings retain action inputs and defaults', () => {
+  for (const text of ['sizes: {}', 'sizes: {xs: {}, xl: {}}']) {
+    assert.deepEqual(resolveOptions({ xs_label: 'tiny' }, parseConfig(text)), { ...DEFAULTS, xs_label: 'tiny' });
+  }
+});
+
+test('invalid size mappings and fields fail before API writes', async () => {
+  for (const text of [
+    'sizes: null', 'sizes: []', 'sizes: true', 'sizes: xs',
+    'sizes: {xs: null}', 'sizes: {xs: []}', 'sizes: {xs: 15}', 'sizes: {xl: huge}',
+    'sizes: {xxl: {}}', 'sizes: {XS: {}}', 'sizes: {xs: {max: 15}}',
+    'sizes: {xl: {max_size: 2000}}', 'sizes: {xs: {label: tiny, label: other}}',
+    'sizes: {xs: {}, xs: {}}', 'sizes: {xs: {label: null}}', 'sizes: {xs: {label: ""}}',
+    'sizes: {xs: {label: size/s}}', 'sizes: {xs: {max_size: null}}',
+    'sizes: {xs: {max_size: 100}}', 'sizes: {xs: {max_size: 1.5}}',
+    'sizes: {xs: {max_size: true}}', 'sizes: {xs: {max_size: 0}}',
+  ]) {
+    const f = fixture({ config: { '.github/size-labeler.yaml': text } });
+    await assert.rejects(f.execute(), undefined, text);
+    assert.deepEqual(f.writes(), [], text);
+  }
+});
+
+test('flat size keys are rejected in config but remain valid action inputs', () => {
+  for (const size of ['xs', 's', 'm', 'l', 'xl']) {
+    for (const field of ['label', 'max_size']) {
+      const key = `${size}_${field}`;
+      assert.throws(() => parseConfig(`${key}: 15`), /Unknown configuration key/);
+    }
+  }
+  assert.equal(resolveOptions({ xs_label: 'tiny', xs_max_size: '20' }).xs_max_size, 20);
+  assert.throws(() => parseConfig('sizes: {xs: {label: tiny}}\nxs_label: old'), /Unknown configuration key/);
 });
 
 test('invalid YAML, duplicate keys, unknown keys and credential overrides are rejected', () => {
@@ -44,7 +96,7 @@ test('legacy quoted/whitespace-separated patterns and YAML lists are supported',
 });
 
 test('autodiscovery reads the first available config from the PR base SHA', async () => {
-  const f = fixture({ config: { '.github/size-labeler.yaml': 'xs_max_size: 5', '.github/size-labeler.yml': 'xs_max_size: 20' } });
+  const f = fixture({ config: { '.github/size-labeler.yaml': 'sizes: {xs: {max_size: 5}}', '.github/size-labeler.yml': 'sizes: {xs: {max_size: 20}}' } });
   await f.execute();
   assert.equal(f.outputs.label, 'size/S');
   assert.equal(f.outputs.config_file, '.github/size-labeler.yaml');
@@ -55,7 +107,7 @@ test('autodiscovery reads the first available config from the PR base SHA', asyn
 });
 
 test('autodiscovery falls back to size-labeler.yml and then action inputs', async () => {
-  const f = fixture({ config: { '.github/size-labeler.yml': 'xs_max_size: 5' } });
+  const f = fixture({ config: { '.github/size-labeler.yml': 'sizes: {xs: {max_size: 5}}' } });
   await f.execute();
   assert.equal(f.outputs.config_file, '.github/size-labeler.yml');
   assert.equal(f.outputs.label, 'size/S');
@@ -66,7 +118,7 @@ test('autodiscovery falls back to size-labeler.yml and then action inputs', asyn
 });
 
 test('explicit config path does not fall back; missing path fails before writes', async () => {
-  const f = fixture({ config: { 'config/size.yaml': 'xs_max_size: 5' } });
+  const f = fixture({ config: { 'config/size.yaml': 'sizes: {xs: {max_size: 5}}' } });
   await f.execute({ config_file: 'config/size.yaml' });
   assert.equal(f.outputs.label, 'size/S');
   assert.deepEqual(f.calls.filter((c) => c.name === 'getContent').map((c) => c.parameters.path), ['config/size.yaml']);
@@ -86,7 +138,7 @@ test('empty configuration is valid; invalid configuration stops before writes', 
   const empty = fixture({ config: { '.github/size-labeler.yml': '# no overrides' } });
   await empty.execute();
   assert.equal(empty.outputs.label, 'size/XS');
-  const invalid = fixture({ config: { '.github/size-labeler.yml': 's_max_size: 2' } });
+  const invalid = fixture({ config: { '.github/size-labeler.yml': 'sizes: {s: {max_size: 2}}' } });
   await assert.rejects(invalid.execute(), /strictly increasing/);
   assert.deepEqual(invalid.writes(), []);
 });
