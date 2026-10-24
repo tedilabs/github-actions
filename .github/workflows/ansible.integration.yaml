@@ -1,0 +1,73 @@
+name: Ansible - Integration
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      target_dir:
+        type: string
+        required: false
+        default: ./
+        description: "(Optional) The Ansible project directory to lint, where `.ansible-lint` and `ansible.cfg` live. Defaults to `./`."
+      requirements_file:
+        type: string
+        required: false
+        description: "(Optional) The path to a Galaxy requirements file, relative to the repository root (e.g. `ansible/requirements.yaml`). When set, its collections are installed so `ansible-lint` can resolve them. When omitted, `ansible-lint` installs a `requirements.yml` found in the project directory on its own."
+
+      ansible_lint_version:
+        type: string
+        required: false
+        default: latest
+        description: "(Optional) The version of `ansible-lint` to install with `pip` (e.g. `25.1.3`). Defaults to `latest`."
+
+
+jobs:
+  lint:
+    name: Lint (ansible-lint)
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # The tools and their versions come from the repository's mise config (`mise.toml` or `.tool-versions`),
+    # which therefore has to pin `python`. The project directory is passed so a `mise.toml` placed there
+    # overrides the repository-wide one, and only `python` is installed, since `ansible-lint` comes from
+    # `pip` below and the other tools a repository pins are never run by a lint job.
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        working_directory: ${{ inputs.target_dir }}
+        install_args: python
+
+    - name: Install ansible-lint
+      id: install-ansible-lint
+      env:
+        ANSIBLE_LINT_VERSION: ${{ inputs.ansible_lint_version }}
+      run: |
+        package="ansible-lint"
+        if [ "$ANSIBLE_LINT_VERSION" != "latest" ]; then
+          package="ansible-lint==$ANSIBLE_LINT_VERSION"
+        fi
+
+        python -m pip install --upgrade pip
+        python -m pip install "$package"
+
+    - name: Lint (ansible-lint)
+      id: ansible-lint
+      uses: tedilabs/github-actions/.github/actions/ansible.ansible-lint@main
+      with:
+        target_dir: ${{ inputs.target_dir }}
+        requirements_file: ${{ inputs.requirements_file }}
