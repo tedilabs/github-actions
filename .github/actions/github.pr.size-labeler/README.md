@@ -46,7 +46,9 @@ Set `config_file: .github/custom-size.yaml` to read only that path. An explicitl
 
 Files group size settings under `sizes`, keyed by `xs`, `s`, `m`, `l`, and `xl`. Each size accepts `label`; XS through L also accept `max_size`. XL has no upper bound and rejects `max_size`. Other policy settings remain top-level keys. Action inputs keep their flat names; flat size keys such as `xs_label` and `xs_max_size` are not accepted in config files. `github_token`, `github_api_url`, `pr_number`, and `config_file` remain invocation inputs. Unknown keys, duplicate YAML keys, multiple documents, invalid booleans, and non-increasing thresholds fail validation. An empty file or `{}` applies no overrides.
 
-For example, `.github/size-labeler.yaml`:
+For a complete configuration with built-in defaults, copy [config.example.yaml](config.example.yaml) to `.github/size-labeler.yaml` in the calling repository. Remove any fields that should inherit action inputs instead.
+
+For example, a customized `.github/size-labeler.yaml`:
 
 ```yaml
 sizes:

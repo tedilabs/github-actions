@@ -1,0 +1,27 @@
+# Copy to .github/size-labeler.yaml in the calling repository.
+# All values below match the action's built-in defaults.
+# File values override action inputs; remove fields to inherit their input values.
+
+sizes:
+  xs:
+    label: size/XS
+    max_size: 15
+  s:
+    label: size/S
+    max_size: 100
+  m:
+    label: size/M
+    max_size: 500
+  l:
+    label: size/L
+    max_size: 1000
+  xl:
+    label: size/XL
+
+files_to_ignore: []
+ignore_file_deletions: true
+ignore_line_deletions: false
+overwrite_size_labels: true
+fail_if_xl: false
+message_if_xl: This PR has too many changes. Please make sure you are NOT addressing multiple issues with one PR.
+dry_run: false
