@@ -1,0 +1,96 @@
+name: AWS - CodeArtifact Configure Credentials
+description: Export a CodeArtifact authorization token and repository endpoint using the job's AWS credentials.
+
+
+inputs:
+  aws_region:
+    required: true
+    description: "(Required) The AWS region of the CodeArtifact domain."
+  domain:
+    required: true
+    description: "(Required) The name of the CodeArtifact domain."
+  domain_owner:
+    required: true
+    description: "(Required) The AWS account ID that owns the CodeArtifact domain."
+  repository:
+    required: true
+    description: "(Required) The name of the CodeArtifact repository."
+  format:
+    required: true
+    description: "(Required) The package format: `pypi`, `npm`, or `maven`."
+  token_duration_seconds:
+    required: false
+    default: "0"
+    description: "(Optional) The token lifetime in seconds: `0` or `900` through `43200`. Defaults to `0`, which requires assumed-role credentials and uses the remaining role session lifetime."
+
+outputs:
+  repository_endpoint:
+    value: ${{ steps.configure-credentials.outputs.repository_endpoint }}
+    description: "The repository endpoint for the requested package format, without credentials."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Configure CodeArtifact Credentials
+    id: configure-credentials
+    shell: bash
+    env:
+      INPUT_AWS_REGION: ${{ inputs.aws_region }}
+      INPUT_DOMAIN: ${{ inputs.domain }}
+      INPUT_DOMAIN_OWNER: ${{ inputs.domain_owner }}
+      INPUT_REPOSITORY: ${{ inputs.repository }}
+      INPUT_FORMAT: ${{ inputs.format }}
+      INPUT_TOKEN_DURATION_SECONDS: ${{ inputs.token_duration_seconds }}
+      AWS_CLI_AUTO_PROMPT: "off"
+    run: |
+      set -euo pipefail
+
+      for input in AWS_REGION DOMAIN DOMAIN_OWNER REPOSITORY FORMAT TOKEN_DURATION_SECONDS; do
+        variable="INPUT_$input"
+        if [[ -z "${!variable}" ]]; then
+          echo "::error::Missing required input: $input."
+          exit 1
+        fi
+      done
+
+      case "$INPUT_FORMAT" in
+        pypi|npm|maven) ;;
+        *) echo "::error::format must be pypi, npm, or maven."; exit 1 ;;
+      esac
+
+      duration="$INPUT_TOKEN_DURATION_SECONDS"
+      if ! [[ "$duration" =~ ^(0|[1-9][0-9]{0,4})$ ]]; then
+        echo "::error::token_duration_seconds must be 0 or an integer from 900 through 43200."
+        exit 1
+      fi
+      if (( duration != 0 && (duration < 900 || duration > 43200) )); then
+        echo "::error::token_duration_seconds must be 0 or an integer from 900 through 43200."
+        exit 1
+      fi
+
+      aws_args=(--region "$INPUT_AWS_REGION" --domain "$INPUT_DOMAIN" --domain-owner "$INPUT_DOMAIN_OWNER" --output text --no-cli-pager)
+      token="$(aws codeartifact get-authorization-token "${aws_args[@]}" \
+        --duration-seconds "$duration" --query authorizationToken)"
+
+      if [[ -z "$token" || "$token" == None || "$token" == null || "$token" == *$'\n'* || "$token" == *$'\r'* ]]; then
+        echo "::error::AWS did not return a valid authorization token."
+        exit 1
+      fi
+      echo "::add-mask::$token"
+
+      endpoint="$(aws codeartifact get-repository-endpoint "${aws_args[@]}" \
+        --repository "$INPUT_REPOSITORY" --format "$INPUT_FORMAT" --query repositoryEndpoint)"
+
+      if [[ "$endpoint" != https://* || "$endpoint" == *$'\n'* || "$endpoint" == *$'\r'* ]]; then
+        echo "::error::AWS did not return a valid repository endpoint."
+        exit 1
+      fi
+
+      # Export only after both API calls succeed. The token is never an action output.
+      {
+        echo "CODEARTIFACT_AUTH_TOKEN=$token"
+        echo "CODEARTIFACT_REPOSITORY_ENDPOINT=$endpoint"
+      } >> "$GITHUB_ENV"
+      echo "repository_endpoint=$endpoint" >> "$GITHUB_OUTPUT"
