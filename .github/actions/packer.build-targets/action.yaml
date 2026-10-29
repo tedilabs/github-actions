@@ -1,0 +1,189 @@
+name: Packer - Build Targets
+description: Resolve the Packer build directories to build, and the variable files they build with, for use as a job matrix.
+
+
+inputs:
+  mode:
+    required: false
+    default: changed
+    description: "(Optional) How the build directories are chosen. `changed` resolves them from `directories`, for a push or a pull request. `all` enumerates every build directory under `builds_dir`, for a scheduled or manually dispatched full build. Defaults to `changed`."
+  directories:
+    required: false
+    description: "(Required in `changed` mode) A JSON array of changed directories, typically the `directories` output of the `git.changed-dirs` action. Each is resolved to the nearest directory, itself or an ancestor, that holds a Packer template."
+  builds_dir:
+    required: false
+    default: builds
+    description: "(Optional, `all` mode) The directory whose immediate subdirectories are the build directories. Defaults to `builds`."
+  vars_dir:
+    required: false
+    default: vars
+    description: "(Optional) The subdirectory of a build directory holding its variable files, one per variant. A build directory without it yields a single target that builds with no `-var-file`, leaving any `*.auto.pkrvars.hcl` beside the template to apply on its own. Defaults to `vars`."
+  vars_pattern:
+    required: false
+    default: "*.pkrvars.hcl"
+    description: "(Optional) The glob matched against `vars_dir` to find the variable files. Defaults to `*.pkrvars.hcl`."
+  builds:
+    required: false
+    description: "(Optional) A comma-separated list of build directory names to keep (e.g. `ubuntu-2604,amazon-linux-2023`), for a manual dispatch of part of the repository. Empty keeps every resolved build."
+  variants:
+    required: false
+    description: "(Optional) A comma-separated list of variant names to keep (e.g. `prod`), matched against the variable file name without its extension. Empty keeps every variant."
+
+outputs:
+  has_targets:
+    value: ${{ steps.resolve.outputs.has_targets }}
+    description: "Whether `targets` is non-empty. `true` or `false`."
+  targets:
+    value: ${{ steps.resolve.outputs.targets }}
+    description: "A JSON array of `{\"name\": ..., \"build\": ..., \"path\": ..., \"variant\": ..., \"var_file\": ...}` objects for `strategy.matrix.include`. `build` is the directory name, `path` the directory, `variant` the variable file's name without its extension (empty when the build has none), `var_file` that file's path (empty likewise), and `name` the `<build> / <variant>` label the workflow reuses for the job name, the concurrency group, and the report row."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Build Targets
+    id: resolve
+    shell: bash
+    env:
+      MODE: ${{ inputs.mode }}
+      DIRECTORIES: ${{ inputs.directories }}
+      BUILDS_DIR: ${{ inputs.builds_dir }}
+      VARS_DIR: ${{ inputs.vars_dir }}
+      VARS_PATTERN: ${{ inputs.vars_pattern }}
+      BUILDS: ${{ inputs.builds }}
+      VARIANTS: ${{ inputs.variants }}
+    run: |
+      case "$MODE" in
+        changed|all) ;;
+        *)
+          echo "::error::Invalid mode: $MODE. Valid values are changed or all."
+          exit 1
+          ;;
+      esac
+
+      shopt -s nullglob
+
+      # A directory is a build directory when it holds a Packer template, the same test the
+      # `packer.fmt` and `packer.validate` actions use to decide whether there is anything to do.
+      is_build_dir() {
+        local dir="$1" path
+        for path in "$dir"/*.pkr.hcl "$dir"/*.pkr.json; do
+          [ -f "$path" ] && return 0
+        done
+        return 1
+      }
+
+      # Empty keeps everything, so an unset filter is not the same as one that matched nothing.
+      keeps() {
+        local filter="$1" value="$2" wanted
+        [ -z "$filter" ] && return 0
+        IFS=',' read -ra wanted <<< "$filter"
+        for name in "${wanted[@]}"; do
+          name="${name// /}"
+          [ -n "$name" ] && [ "$name" = "$value" ] && return 0
+        done
+        return 1
+      }
+
+      # ---- the build directories to consider ----
+      build_dirs=()
+      add_build_dir() {
+        local dir="${1%/}"
+        for existing in "${build_dirs[@]}"; do
+          [ "$existing" = "$dir" ] && return 0
+        done
+        build_dirs+=("$dir")
+      }
+
+      if [ "$MODE" = "all" ]; then
+        for path in "${BUILDS_DIR%/}"/*/; do
+          if is_build_dir "${path%/}"; then
+            add_build_dir "$path"
+          else
+            echo "Skipping ${path%/}: no Packer template files."
+          fi
+        done
+      else
+        while IFS= read -r dir; do
+          [ -z "$dir" ] && continue
+
+          # Walk up from the changed directory, so a change under `<build>/vars/` still builds `<build>`.
+          current="${dir%/}"
+          found=""
+          while :; do
+            if is_build_dir "$current"; then
+              found="$current"
+              break
+            fi
+            [ "$current" = "." ] && break
+            current="$(dirname "$current")"
+          done
+
+          if [ -z "$found" ]; then
+            echo "Skipping $dir: no Packer template files in the directory or its parents."
+            continue
+          fi
+
+          echo "$dir -> $found"
+          add_build_dir "$found"
+        done < <(jq -r '.[]' <<< "${DIRECTORIES:-[]}")
+      fi
+
+      # ---- one target per variable file, or a single one when the build has none ----
+      targets="[]"
+      add_target() {
+        targets="$(jq -c \
+          --arg name "$1" --arg build "$2" --arg path "$3" --arg variant "$4" --arg var_file "$5" \
+          '. + [{name: $name, build: $build, path: $path, variant: $variant, var_file: $var_file}]' \
+          <<< "$targets")"
+      }
+
+      for dir in "${build_dirs[@]}"; do
+        build="$(basename "$dir")"
+        if ! keeps "$BUILDS" "$build"; then
+          echo "Skipping $dir: not in builds."
+          continue
+        fi
+
+        # `find` takes the glob as one quoted argument, so a pattern is not word-split, a missing
+        # directory is not an error, and the order is stable across runs, which keeps the matrix stable.
+        var_files=()
+        while IFS= read -r var_file; do
+          [ -n "$var_file" ] && var_files+=("$var_file")
+        done < <(find "$dir/${VARS_DIR%/}" -maxdepth 1 -type f -name "$VARS_PATTERN" 2>/dev/null | sort)
+
+        if [ "${#var_files[@]}" -eq 0 ]; then
+          echo "$dir (no variable files)"
+          add_target "$build" "$build" "$dir" "" ""
+          continue
+        fi
+
+        for var_file in "${var_files[@]}"; do
+          variant="$(basename "$var_file")"
+          # Strip the whole known suffix, so `prod.auto.pkrvars.hcl` stays `prod.auto` rather than losing
+          # a second extension. Anything else loses only its last one.
+          if [ "$variant" != "${variant%.pkrvars.hcl}" ]; then
+            variant="${variant%.pkrvars.hcl}"
+          else
+            variant="${variant%.*}"
+          fi
+          if ! keeps "$VARIANTS" "$variant"; then
+            echo "Skipping $var_file: not in variants."
+            continue
+          fi
+
+          echo "$dir / $variant ($var_file)"
+          add_target "$build / $variant" "$build" "$dir" "$variant" "$var_file"
+        done
+      done
+
+      if [ "$(jq 'length' <<< "$targets")" -gt 0 ]; then
+        has_targets=true
+      else
+        has_targets=false
+      fi
+
+      echo "Targets: $targets"
+      echo "has_targets=$has_targets" >> "$GITHUB_OUTPUT"
+      echo "targets=$targets" >> "$GITHUB_OUTPUT"
