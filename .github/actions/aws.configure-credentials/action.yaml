@@ -19,6 +19,10 @@ inputs:
     required: false
     default: GitHubActions
     description: "(Optional) The identifier for the assumed role session via GitHub OIDC. Defaults to `GitHubActions`."
+  aws_github_oidc_role_duration:
+    required: false
+    default: "3600"
+    description: "(Optional) The duration in seconds of the role session assumed via GitHub OIDC. Must be between 900 and the role's maximum session duration (up to 43200). Defaults to `3600`."
   aws_github_oidc_audience:
     required: false
     default: sts.amazonaws.com
@@ -30,6 +34,10 @@ inputs:
     required: false
     default: GitHubActions
     description: "(Optional) The identifier for the assumed role session when assuming the chained IAM role. Defaults to `GitHubActions`."
+  aws_chained_role_duration:
+    required: false
+    default: "3600"
+    description: "(Optional) The duration in seconds of the role session assumed via aws_chained_iam_role. Must be between 900 and 3600 when chaining from the GitHub OIDC role, or up to the role's maximum session duration (up to 43200) when using IAM user access keys. Ignored when aws_chained_iam_role is not set. Defaults to `3600`."
 
 outputs:
   aws_account_id:
@@ -57,6 +65,7 @@ runs:
       aws-secret-access-key: ${{ inputs.aws_secret_access_key }}
       role-to-assume: ${{ inputs.aws_chained_iam_role }}
       role-session-name: ${{ inputs.aws_chained_session_name }}
+      role-duration-seconds: ${{ inputs.aws_chained_role_duration }}
       mask-aws-account-id: true
 
   - name: Configure GitHub OIDC IAM Role
@@ -67,6 +76,7 @@ runs:
       aws-region: ${{ inputs.aws_region }}
       role-to-assume: ${{ inputs.aws_github_oidc_iam_role }}
       role-session-name: ${{ inputs.aws_github_oidc_session_name }}
+      role-duration-seconds: ${{ inputs.aws_github_oidc_role_duration }}
       audience: ${{ inputs.aws_github_oidc_audience }}
       mask-aws-account-id: true
 
@@ -78,5 +88,6 @@ runs:
       aws-region: ${{ inputs.aws_region }}
       role-to-assume: ${{ inputs.aws_chained_iam_role }}
       role-session-name: ${{ inputs.aws_chained_session_name }}
+      role-duration-seconds: ${{ inputs.aws_chained_role_duration }}
       role-chaining: true
       mask-aws-account-id: true
