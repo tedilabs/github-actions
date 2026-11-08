@@ -1,0 +1,69 @@
+name: MISC - Export Environment
+description: Export `KEY=value` lines into the job environment, so a reusable workflow can receive provider credentials it cannot name in advance.
+
+
+inputs:
+  env:
+    required: false
+    description: "(Optional) The variables to export, one `KEY=value` per line. Blank lines and lines starting with `#` are ignored, and a line whose value is empty is skipped rather than exported as an empty string. Pass this as a secret: every value is masked, but only a value GitHub already knows to be a secret is masked before this action runs."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Export Environment Variables
+    id: export
+    shell: bash
+    env:
+      ENV_LINES: ${{ inputs.env }}
+    run: |
+      if [ -z "${ENV_LINES//[[:space:]]/}" ]; then
+        echo "No variables to export."
+        exit 0
+      fi
+
+      line_number=0
+      exported=()
+      while IFS= read -r line; do
+        line_number=$((line_number + 1))
+        line="${line%$'\r'}"
+
+        [ -z "${line//[[:space:]]/}" ] && continue
+        case "${line#"${line%%[![:space:]]*}"}" in '#'*) continue ;; esac
+
+        if [[ "$line" != *=* ]]; then
+          echo "::error::Line $line_number is not a KEY=value pair."
+          exit 1
+        fi
+
+        name="${line%%=*}"
+        value="${line#*=}"
+        # Trim the surrounding whitespace a block scalar tends to carry.
+        name="${name#"${name%%[![:space:]]*}"}"
+        name="${name%"${name##*[![:space:]]}"}"
+
+        if ! [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+          echo "::error::Line $line_number does not start with a valid environment variable name."
+          exit 1
+        fi
+
+        # The runner owns these, and overwriting them changes how every later step runs.
+        case "$name" in
+          PATH|GITHUB_*|RUNNER_*)
+            echo "::error::Refusing to set $name, which belongs to the runner."
+            exit 1
+            ;;
+        esac
+
+        if [ -z "$value" ]; then
+          echo "::warning::Skipping $name, whose value is empty. The secret behind it is probably not set."
+          continue
+        fi
+
+        echo "::add-mask::$value"
+        echo "$name=$value" >> "$GITHUB_ENV"
+        exported+=("$name")
+      done <<< "$ENV_LINES"
+
+      echo "Exported: ${exported[*]:-(none)}"
