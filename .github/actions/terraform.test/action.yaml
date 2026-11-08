@@ -1,0 +1,257 @@
+name: Terraform - Test
+description: Initialize a Terraform directory without a backend and run its tests with `terraform test`. On failure, the output is added to the job summary. Requires Terraform 1.6 or later on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Terraform directory to initialize and test. Defaults to `./`."
+  workspace:
+    required: false
+    description: "(Optional) The Terraform workspace name to test as, exported as `TF_WORKSPACE`. Defaults to Terraform's `default` workspace."
+  test_directory:
+    required: false
+    default: tests
+    description: "(Optional) The directory holding the test files, relative to `target_dir`, passed as `-test-directory` to both init and test. Tests directly in `target_dir` are always loaded. Defaults to `tests`."
+  filters:
+    required: false
+    description: "(Optional) The test files to execute, one path per line, each passed as `-filter`. Paths are relative to `target_dir`, including the test directory (e.g. `tests/main.tftest.hcl`). Omit to execute all test files."
+  var_files:
+    required: false
+    description: "(Optional) The variable files to load, one path per line, each passed as `-var-file`. Relative paths are resolved against `target_dir`. Files are loaded in order, before `vars`."
+  vars:
+    required: false
+    description: "(Optional) Input variable assignments, one `key=value` per line, each passed as `-var`. Spaces and HCL expressions are preserved; do not add shell quotes around an assignment. Use `TF_VAR_*` environment variables for sensitive values."
+  format:
+    required: false
+    default: text
+    description: "(Optional) The test output format. Valid values are `text` or `json`, which passes `-json` for a newline-delimited JSON message stream. Defaults to `text`."
+  verbose:
+    required: false
+    default: "false"
+    description: "(Optional) Whether to print the plan or state for each test run with `-verbose`. Defaults to `false`."
+  parallelism:
+    required: false
+    description: "(Optional) The maximum concurrent resource operations within each test run, passed as `-parallelism`. Requires Terraform 1.12 or later. Omit to use Terraform's default of 10."
+  junit_xml:
+    required: false
+    description: "(Optional) The path to write a JUnit XML report to, passed as `-junit-xml`. Relative paths are resolved against `target_dir`; the parent directory must exist. Requires Terraform 1.11 or later. Cannot be combined with `cloud_run`."
+  cloud_run:
+    required: false
+    description: "(Optional) The private registry module source to execute tests against remotely in HCP Terraform, passed as `-cloud-run`. The caller configures credentials. Local initialization is skipped. Cannot be combined with `junit_xml`."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate findings when init or test fails, from its captured output. Tests are never re-run to collect diagnostics. Defaults to `true`."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when neither `target_dir` nor `test_directory` holds test files and no commands were run. Empty otherwise."
+  # When `terraform init` fails, `terraform test` does not run, so the outputs come from the command that failed.
+  stdout:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stdout || steps.test.outputs.stdout }}
+    description: "The STDOUT stream of the call to `terraform test`, or to `terraform init` when it failed. Empty when skipped."
+  stderr:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.stderr || steps.test.outputs.stderr }}
+    description: "The STDERR stream of the call to `terraform test`, or to `terraform init` when it failed. Empty when skipped."
+  exitcode:
+    value: ${{ steps.init.outcome == 'failure' && steps.init.outputs.exitcode || steps.test.outputs.exitcode }}
+    description: "The exit code of the call to `terraform test`, or to `terraform init` when it failed. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      TEST_DIRECTORY: ${{ inputs.test_directory }}
+      FORMAT: ${{ inputs.format }}
+      JUNIT_XML: ${{ inputs.junit_xml }}
+      CLOUD_RUN: ${{ inputs.cloud_run }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      case "$FORMAT" in
+        text|json) ;;
+        *)
+          echo "::error::Invalid format: $FORMAT. Valid values are text or json."
+          exit 1
+          ;;
+      esac
+      if [ -n "$JUNIT_XML" ] && [ -n "$CLOUD_RUN" ]; then
+        echo "::error::junit_xml cannot be combined with cloud_run."
+        exit 1
+      fi
+      if [ ! -d "$target_dir" ]; then
+        echo "::error::Terraform directory not found: $target_dir."
+        exit 1
+      fi
+
+      # Terraform only discovers test files directly in these two directories, not recursively. A module
+      # without tests would otherwise report a vacuous pass; test-only configurations are valid too.
+      shopt -s nullglob
+      files=("$target_dir"/*.tftest.hcl "$target_dir"/*.tftest.json
+        "$target_dir/${TEST_DIRECTORY:-tests}"/*.tftest.hcl "$target_dir/${TEST_DIRECTORY:-tests}"/*.tftest.json)
+      if [ "${#files[@]}" -eq 0 ]; then
+        echo "::notice::Skipping terraform test: no test files in $target_dir or ${TEST_DIRECTORY:-tests}."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+      fi
+
+  # Remote execution installs providers and modules in HCP Terraform, so it needs no local init.
+  - name: Terraform Init
+    id: init
+    if: steps.target.outputs.skipped != 'true' && inputs.cloud_run == ''
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+      TEST_DIRECTORY: ${{ inputs.test_directory }}
+    with:
+      run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
+
+        terraform -chdir="$TARGET_DIR" init \
+          -backend=false \
+          -input=false \
+          -no-color \
+          -test-directory="${TEST_DIRECTORY:-tests}"
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: always() && steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform init · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ steps.init.outputs.log_file }}
+      lang: text
+
+  - name: Terraform Test
+    id: test
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      WORKSPACE: ${{ inputs.workspace }}
+      TEST_DIRECTORY: ${{ inputs.test_directory }}
+      FILTERS: ${{ inputs.filters }}
+      VAR_FILES: ${{ inputs.var_files }}
+      VARS: ${{ inputs.vars }}
+      FORMAT: ${{ inputs.format }}
+      VERBOSE: ${{ inputs.verbose }}
+      PARALLELISM: ${{ inputs.parallelism }}
+      JUNIT_XML: ${{ inputs.junit_xml }}
+      CLOUD_RUN: ${{ inputs.cloud_run }}
+    with:
+      run: |
+        if [ -n "$WORKSPACE" ]; then
+          export TF_WORKSPACE="$WORKSPACE"
+        fi
+
+        args=(-no-color -test-directory="${TEST_DIRECTORY:-tests}")
+        if [ "$FORMAT" = "json" ]; then
+          args+=(-json)
+        fi
+        if [ "$VERBOSE" = "true" ]; then
+          args+=(-verbose)
+        fi
+        if [ -n "$PARALLELISM" ]; then
+          args+=(-parallelism="$PARALLELISM")
+        fi
+        if [ -n "$JUNIT_XML" ]; then
+          args+=(-junit-xml="$JUNIT_XML")
+        fi
+        if [ -n "$CLOUD_RUN" ]; then
+          args+=(-cloud-run="$CLOUD_RUN")
+        fi
+
+        # Each line is one argument. Quoted arrays preserve spaces and HCL expressions without evaluating
+        # shell syntax. Variable files precede explicit assignments so `vars` can override their values.
+        while IFS= read -r file; do
+          [ -z "$file" ] || args+=(-filter="$file")
+        done <<< "$FILTERS"
+        while IFS= read -r file; do
+          [ -z "$file" ] || args+=(-var-file="$file")
+        done <<< "$VAR_FILES"
+        while IFS= read -r assignment; do
+          [ -z "$assignment" ] || args+=(-var="$assignment")
+        done <<< "$VARS"
+
+        terraform -chdir="$TARGET_DIR" test "${args[@]}"
+
+  # Unlike validate, test can create infrastructure. Read the captured output instead of re-running it.
+  - name: Annotate Findings
+    id: test-annotate
+    if: always() && inputs.annotations_enabled == 'true' && (steps.init.outcome == 'failure' || steps.test.outcome == 'failure')
+    shell: bash
+    env:
+      INIT_OUTCOME: ${{ steps.init.outcome }}
+      INIT_LOG: ${{ steps.init.outputs.log_file }}
+      TEST_LOG: ${{ steps.test.outputs.log_file }}
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      FORMAT: ${{ inputs.format }}
+    run: |
+      tool="terraform test"
+      log="$TEST_LOG"
+      if [ "$INIT_OUTCOME" = "failure" ]; then
+        tool="terraform init"
+        log="$INIT_LOG"
+      fi
+      prefix=""
+      if [ "$TARGET_DIR" != "." ]; then
+        prefix="$TARGET_DIR/"
+      fi
+
+      if [ "$INIT_OUTCOME" != "failure" ] && [ "$FORMAT" = "json" ]; then
+        # CLI parsing errors can still be plain text even with `-json`; leave those to the text parser below.
+        jq -Rr --arg prefix "$prefix" --arg tool "$tool" '
+          def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+          def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
+          fromjson? | select(.type == "diagnostic") | .diagnostic
+          | (if .severity == "error" then "error" else "warning" end) as $severity
+          | (.summary + (if (.detail // "") != "" then "\n\n" + .detail else "" end) | esc) as $message
+          | ($tool + " · " + .summary | prop) as $title
+          | if .range then
+              "::\($severity) file=\($prefix + .range.filename | prop),line=\(.range.start.line),col=\(.range.start.column),title=\($title)::\($message)"
+            else
+              "::\($severity) title=\($title)::\($message)"
+            end
+        ' "$log"
+      fi
+
+      # Text diagnostics start with `Error:` or `Warning:` and optionally name a file on the following lines.
+      awk -v prefix="$prefix" -v tool="$tool" '
+        function esc(text) { gsub(/%/, "%25", text); gsub(/\r/, "%0D", text); return text }
+        function prop(text) { text = esc(text); gsub(/:/, "%3A", text); gsub(/,/, "%2C", text); return text }
+        function flush() {
+          if (summary == "") { return }
+          printf "::%s title=%s::%s\n", severity, prop(tool " · " summary), esc(summary)
+          summary = ""
+        }
+        /^(Error|Warning): / { flush(); severity = tolower($1); sub(/:$/, "", severity); summary = substr($0, index($0, ": ") + 2); next }
+        /^[[:space:]]+on .+ line [0-9]+/ && summary != "" {
+          file = $0; sub(/^[[:space:]]+on /, "", file); sub(/ line [0-9]+.*$/, "", file)
+          line = $0; sub(/^.* line /, "", line); sub(/[^0-9].*$/, "", line)
+          printf "::%s file=%s,line=%s,title=%s::%s\n", severity, prop(prefix file), line, prop(tool " · " summary), esc(summary)
+          summary = ""
+        }
+        END { flush() }
+      ' "$log"
+
+  - name: Add Failure Details to Job Summary
+    id: test-summary
+    if: always() && steps.test.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ terraform test · ${{ inputs.target_dir }}${{ inputs.workspace && format(' ({0})', inputs.workspace) || '' }}"
+      file: ${{ steps.test.outputs.log_file }}
+      lang: ${{ inputs.format == 'json' && 'json' || 'text' }}
