@@ -1,0 +1,92 @@
+name: YAML - yamllint
+description: Lint YAML files with `yamllint`. On failure, the findings are added to the job summary. Requires the `yamllint` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The directory to lint recursively. Defaults to `./`."
+  config_file:
+    required: false
+    description: "(Optional) The path to the `yamllint` config file, relative to the repository root. When omitted, `yamllint` discovers its config as usual."
+  annotations_enabled:
+    required: false
+    default: "true"
+    description: "(Optional) Whether to annotate findings in the pull request using the GitHub output format. Defaults to `true`."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` is missing or contains no files selected by `yamllint`, including its ignore rules. Empty otherwise."
+  stdout:
+    value: ${{ steps.lint.outputs.stdout }}
+    description: "The STDOUT stream of the call to `yamllint`. Empty when skipped."
+  stderr:
+    value: ${{ steps.lint.outputs.stderr }}
+    description: "The STDERR stream of the call to `yamllint`. Empty when skipped."
+  exitcode:
+    value: ${{ steps.lint.outputs.exitcode }}
+    description: "The exit code of the call to `yamllint`. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      args=()
+      if [ -n "$CONFIG_FILE" ]; then
+        args+=(--config-file "$CONFIG_FILE")
+      fi
+
+      files=""
+      if [ -d "$target_dir" ]; then
+        files=$(yamllint "${args[@]}" --list-files -- "$target_dir")
+      fi
+      if [ -z "$files" ]; then
+        echo "::notice::Skipping yamllint: no YAML files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
+      yamllint --version
+
+  - name: Lint YAML Files
+    id: lint
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+      ANNOTATIONS_ENABLED: ${{ inputs.annotations_enabled }}
+    with:
+      run: |
+        args=(--format standard)
+        if [ "$ANNOTATIONS_ENABLED" = "true" ]; then
+          args=(--format github)
+        fi
+        if [ -n "$CONFIG_FILE" ]; then
+          args+=(--config-file "$CONFIG_FILE")
+        fi
+
+        yamllint "${args[@]}" -- "$TARGET_DIR"
+
+  - name: Add Failure Details to Job Summary
+    id: lint-summary
+    if: always() && steps.lint.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ yamllint · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.lint.outputs.log_file }}
+      lang: text
