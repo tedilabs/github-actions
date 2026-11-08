@@ -1,0 +1,171 @@
+name: Packer - Build
+description: Install the required plugins of a Packer template directory with `packer init` and build it with `packer build`, then render a readable summary of the artifacts it produced. On failure, the output is added to the job summary. Requires the `packer` CLI on the `PATH`.
+
+
+inputs:
+  target_dir:
+    required: false
+    default: ./
+    description: "(Optional) The Packer template directory to build. Defaults to `./`."
+  var_files:
+    required: false
+    description: "(Optional) The variable files to build with, one path per line, each passed as `-var-file`. Paths are relative to the working directory, not to `target_dir`. A `*.auto.pkrvars.hcl` file beside the template is loaded by Packer on its own and does not belong here."
+  args:
+    required: false
+    description: "(Optional) Additional arguments to pass to `packer build` (e.g. `-only=amazon-ebs.base` or `-var 'key=value'`)."
+  github_token:
+    required: false
+    default: ${{ github.token }}
+    description: "(Optional) The GitHub token used by `packer init` to download plugins from GitHub without hitting the anonymous rate limit, exported as `PACKER_GITHUB_API_TOKEN`. Defaults to the automatically generated `github.token`."
+
+outputs:
+  skipped:
+    value: ${{ steps.target.outputs.skipped }}
+    description: "`true` when `target_dir` holds no Packer template files and neither `packer init` nor `packer build` was run. Empty otherwise."
+  artifact_count:
+    value: ${{ steps.build.outputs.artifact_count }}
+    description: "The number of builds that produced an artifact, counted from the artifacts section Packer prints when it finishes."
+  artifacts:
+    value: ${{ steps.build.outputs.artifacts }}
+    description: "The artifacts section Packer printed, one build per `--> ` line with whatever the builder reported below it, such as the AMI ids of an `amazon-ebs` build. Empty when the build produced none."
+  headline:
+    value: ${{ steps.build.outputs.headline }}
+    description: "A single line stating the outcome, suitable for the `headline` input of `github.matrix-report`."
+  summary:
+    value: ${{ steps.build.outputs.summary }}
+    description: "A Markdown summary of the build, suitable for a job summary or a pull request comment."
+  exitcode:
+    value: ${{ steps.build.outputs.exitcode }}
+    description: "The exit code of the call to `packer build`. Empty when skipped. The action still fails on a non-zero exit code, so use `continue-on-error: true` to inspect it."
+
+
+runs:
+  using: composite
+
+  steps:
+  - name: Resolve Target
+    id: target
+    shell: bash
+    env:
+      TARGET_DIR: ${{ inputs.target_dir }}
+    run: |
+      target_dir="${TARGET_DIR%/}"
+      target_dir="${target_dir:-.}"
+      echo "target_dir=$target_dir" >> "$GITHUB_OUTPUT"
+
+      # `packer build` fails on a directory without templates, which would report a failure for an empty target.
+      if [ -z "$(find "$target_dir" -maxdepth 1 -type f \( -name '*.pkr.hcl' -o -name '*.pkr.json' \) -print -quit)" ]; then
+        echo "::notice::Skipping packer build: no Packer template files in $target_dir."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
+      packer version
+
+  - name: Packer Init
+    id: init
+    if: steps.target.outputs.skipped != 'true'
+    uses: tedilabs/github-actions/.github/actions/shell.run@main
+    env:
+      PACKER_GITHUB_API_TOKEN: ${{ inputs.github_token }}
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+    with:
+      run: |
+        packer init "$TARGET_DIR"
+
+  - name: Add Failure Details to Job Summary
+    id: init-summary
+    if: always() && steps.init.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer init · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ steps.init.outputs.log_file }}
+      lang: text
+
+  # A build runs for as long as the image takes, so the output is streamed with `tee` rather than captured
+  # through `shell.run`, which only prints it once the command has returned.
+  - name: Packer Build
+    id: build
+    if: steps.target.outputs.skipped != 'true'
+    shell: bash
+    env:
+      TARGET_DIR: ${{ steps.target.outputs.target_dir }}
+      VAR_FILES: ${{ inputs.var_files }}
+      ARGS: ${{ inputs.args }}
+    run: |
+      log="$RUNNER_TEMP/packer-build.log"
+
+      args=(-color=false)
+      while IFS= read -r var_file; do
+        var_file="${var_file## }"
+        [ -n "$var_file" ] && args+=(-var-file="$var_file")
+      done <<< "$VAR_FILES"
+      read -ra extra_args <<< "$ARGS"
+
+      set +e
+      packer build "${args[@]}" "${extra_args[@]}" "$TARGET_DIR" 2>&1 | tee "$log"
+      exit_code="${PIPESTATUS[0]}"
+      set -e
+      echo "exitcode=$exit_code" >> "$GITHUB_OUTPUT"
+
+      # Packer closes with `==> Builds finished. The artifacts of successful builds are:` followed by one
+      # `--> <build>: ...` line per artifact, and with `==> Some builds didn't complete successfully and had
+      # errors:` followed by one line per failed build. Either section may be absent, and a partly successful
+      # run prints both.
+      artifacts="$(sed -n '/^==> Builds finished\. The artifacts of successful builds are:/,$p' "$log" \
+        | tail -n +2 \
+        | sed '/^==> /d' \
+        | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')"
+      errors="$(sed -n "/^==> Some builds didn't complete successfully and had errors:/,\$p" "$log" \
+        | tail -n +2 \
+        | sed -n '/^==> /q;p' \
+        | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')"
+
+      artifact_count=0
+      if [ -n "$artifacts" ]; then
+        artifact_count="$(grep -c '^--> ' <<< "$artifacts" || true)"
+      fi
+      echo "artifact_count=$artifact_count" >> "$GITHUB_OUTPUT"
+
+      fence() {
+        printf '```text\n%s\n```' "$1"
+      }
+
+      if [ "$exit_code" -ne 0 ]; then
+        headline="Failed"
+        summary="> [!CAUTION]"$'\n'"> The build failed. See the job summary for the output."
+        if [ -n "$errors" ]; then
+          summary="$summary"$'\n\n'"$(fence "$errors")"
+        fi
+        if [ "$artifact_count" -gt 0 ]; then
+          summary="$summary"$'\n\n'"**$artifact_count** of the builds still produced an artifact."$'\n\n'"$(fence "$artifacts")"
+        fi
+      elif [ "$artifact_count" -eq 0 ]; then
+        headline="No artifacts"
+        summary="> [!NOTE]"$'\n'"> The build succeeded without producing an artifact."
+      else
+        headline="$artifact_count artifact(s)"
+        summary="**$artifact_count** artifact(s)."$'\n\n'"$(fence "$artifacts")"
+      fi
+
+      {
+        echo "headline=$headline"
+        echo "artifacts<<PACKER_BUILD_EOF"
+        echo "$artifacts"
+        echo "PACKER_BUILD_EOF"
+        echo "summary<<PACKER_BUILD_EOF"
+        echo "$summary"
+        echo "PACKER_BUILD_EOF"
+      } >> "$GITHUB_OUTPUT"
+
+      echo "$headline"
+      exit "$exit_code"
+
+  - name: Add Failure Details to Job Summary
+    id: build-summary
+    if: always() && steps.build.outcome == 'failure'
+    uses: tedilabs/github-actions/.github/actions/github.step-summary@main
+    with:
+      title: "❌ packer build · ${{ steps.target.outputs.target_dir }}"
+      file: ${{ runner.temp }}/packer-build.log
+      lang: text

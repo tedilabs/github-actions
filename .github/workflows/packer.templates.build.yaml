@@ -1,0 +1,228 @@
+name: Packer Templates - Build
+
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: >
+          JSON-encoded runs-on value.
+          Examples:
+          - '"ubuntu-latest"'
+          - '["self-hosted","linux","x64"]'
+        required: false
+        type: string
+        default: '"ubuntu-latest"'
+
+      scope:
+        type: string
+        required: false
+        default: auto
+        description: "(Optional) Which builds to run: `changed`, `all`, or `auto`. `auto` builds the changed directories on a `push` or a `pull_request` and everything on any other event, which is what makes one caller serve a push, a schedule, and a manual dispatch. Defaults to `auto`."
+      paths:
+        type: string
+        required: false
+        default: |
+          builds/**
+        description: "(Optional, `changed` scope) File and directory patterns used to detect changed build directories, one per line. Defaults to `builds/**`."
+      paths_max_depth:
+        type: string
+        required: false
+        default: "2"
+        description: "(Optional, `changed` scope) The maximum depth of the changed directories to resolve. For example, `builds/foo/source.pkr.hcl` with a max depth of `2` resolves to `builds/foo`. Defaults to `2`."
+      builds_dir:
+        type: string
+        required: false
+        default: builds
+        description: "(Optional, `all` scope) The directory whose immediate subdirectories are the build directories. Defaults to `builds`."
+
+      vars_dir:
+        type: string
+        required: false
+        default: vars
+        description: "(Optional) The subdirectory of a build directory holding one variable file per variant, each of which becomes its own build. A build directory without it is built once with no `-var-file`. Defaults to `vars`."
+      vars_pattern:
+        type: string
+        required: false
+        default: "*.pkrvars.hcl"
+        description: "(Optional) The glob matched against `vars_dir` to find the variable files. Defaults to `*.pkrvars.hcl`."
+
+      builds:
+        type: string
+        required: false
+        description: "(Optional) A comma-separated list of build directory names to keep (e.g. `ubuntu-2604,amazon-linux-2023`). Wire this to a `workflow_dispatch` input to build part of the repository by hand. Empty builds everything in scope."
+      variants:
+        type: string
+        required: false
+        description: "(Optional) A comma-separated list of variant names to keep (e.g. `prod`), matched against the variable file name without its extension. Empty builds every variant."
+
+      build_args:
+        type: string
+        required: false
+        description: "(Optional) Additional arguments to pass to `packer build` (e.g. `-only=amazon-ebs.base`)."
+      max_parallel:
+        type: number
+        required: false
+        default: 4
+        description: "(Optional) How many builds run at once. Images are built on real instances, so the default is deliberately below what the runner limits allow, to stay clear of cloud quotas on a full scheduled build. Defaults to `4`."
+
+      aws_region:
+        type: string
+        required: false
+        description: "(Optional) The AWS region to configure before building. Only needed when the templates use an Amazon builder."
+      aws_github_oidc_iam_role:
+        type: string
+        required: false
+        description: "(Optional) The ARN of the IAM role to assume through GitHub OIDC before building. Requires the `id-token: write` permission on the caller. Leave empty when the builders of these templates need no AWS credentials."
+
+      pr_number:
+        type: string
+        required: false
+        description: "(Optional) The pull request to post the report on. Needed on the events this workflow normally runs on, none of which carries a pull request context. Empty leaves the report in the job summary only."
+      pr_comment_enabled:
+        type: boolean
+        required: false
+        default: true
+        description: "(Optional) Whether to post the build report as a single sticky comment on `pr_number`, or on the pull request of the current event. Requires the `pull-requests: write` permission on the caller. The report is always written to the job summary. Defaults to `true`."
+
+
+jobs:
+  targets:
+    name: Resolve Build Targets
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    permissions:
+      contents: read
+
+    env:
+      MODE: ${{ inputs.scope != 'auto' && inputs.scope || ((github.event_name == 'push' || github.event_name == 'pull_request') && 'changed' || 'all') }}
+
+    outputs:
+      has_targets: ${{ steps.build-targets.outputs.has_targets }}
+      targets: ${{ steps.build-targets.outputs.targets }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: changed-dirs
+      if: env.MODE == 'changed'
+      uses: tedilabs/github-actions/.github/actions/git.changed-dirs@main
+      with:
+        paths: ${{ inputs.paths }}
+        max_depth: ${{ inputs.paths_max_depth }}
+
+    - name: Resolve Build Targets
+      id: build-targets
+      uses: tedilabs/github-actions/.github/actions/packer.build-targets@main
+      with:
+        mode: ${{ env.MODE }}
+        directories: ${{ steps.changed-dirs.outputs.directories }}
+        builds_dir: ${{ inputs.builds_dir }}
+        vars_dir: ${{ inputs.vars_dir }}
+        vars_pattern: ${{ inputs.vars_pattern }}
+        builds: ${{ inputs.builds }}
+        variants: ${{ inputs.variants }}
+
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs:
+    - targets
+    if: needs.targets.outputs.has_targets == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    # Two builds of the same target must never overlap, so a scheduled full build and the build of a
+    # freshly merged change do not race each other into the same image name.
+    concurrency:
+      group: packer-build-${{ github.repository }}-${{ matrix.name }}
+      cancel-in-progress: false
+
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max_parallel }}
+      matrix:
+        include: ${{ fromJson(needs.targets.outputs.targets) }}
+
+    steps:
+    - name: Checkout
+      id: checkout
+      uses: actions/checkout@v7
+
+    # The tools and their versions come from the repository's mise config (`mise.toml` or `.tool-versions`).
+    # The build directory is passed so a `mise.toml` placed there overrides the repository-wide one,
+    # and only `packer` is installed, so a repository that pins other tools does not pay to install them.
+    - name: Set up tools
+      id: setup-tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        working_directory: ${{ matrix.path }}
+        install_args: packer
+
+    - name: Configure AWS Credentials
+      id: configure-aws
+      if: inputs.aws_github_oidc_iam_role != ''
+      uses: tedilabs/github-actions/.github/actions/aws.configure-credentials@main
+      with:
+        aws_region: ${{ inputs.aws_region }}
+        aws_github_oidc_iam_role: ${{ inputs.aws_github_oidc_iam_role }}
+
+    - name: Build
+      id: build
+      continue-on-error: true
+      uses: tedilabs/github-actions/.github/actions/packer.build@main
+      with:
+        target_dir: ${{ matrix.path }}
+        var_files: ${{ matrix.var_file }}
+        args: ${{ inputs.build_args }}
+
+    - name: Collect Results
+      id: results
+      if: always()
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: collect
+        id: ${{ matrix.name }}
+        id_label: Build
+        artifact_prefix: packer-build-report
+        job_status: ${{ job.status }}
+        headline: ${{ steps.build.outputs.headline }}
+        details: ${{ steps.build.outputs.summary }}
+        results: |
+          {
+            "build": "${{ steps.build.outcome }}"
+          }
+
+
+  report:
+    name: Report
+    needs:
+    - targets
+    - build
+    if: always() && needs.targets.outputs.has_targets == 'true'
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+    - name: Publish Report
+      id: report
+      uses: tedilabs/github-actions/.github/actions/github.matrix-report@main
+      with:
+        mode: publish
+        id_label: Build
+        artifact_prefix: packer-build-report
+        title: Packer Build
+        pr_number: ${{ inputs.pr_number }}
+        pr_comment_enabled: ${{ inputs.pr_comment_enabled }}
+        pr_comment_marker: packer-build
