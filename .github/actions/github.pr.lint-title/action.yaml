@@ -1,0 +1,132 @@
+name: GitHub Pull Request - Lint Title
+description: "Lint the pull request title with `commitlint`. With squash merges the title becomes the commit message, which release tools such as `release-please` read to compute the next version. Installs commitlint with mise at the version of `npm:@commitlint/cli` in the repository's mise config, and uses the repository's commitlint config, so titles follow the same rules as local commits. Run it on the `opened`, `edited`, `reopened` and `synchronize` events of `pull_request` so that title changes are checked."
+
+
+inputs:
+  title:
+    required: false
+    default: ${{ github.event.pull_request.title }}
+    description: "(Optional) The pull request title to lint. Defaults to the title of the pull request that triggered the workflow."
+  config_file:
+    required: false
+    default: ".commitlintrc.yaml"
+    description: "(Optional) The commitlint config file, relative to the workspace. It is used only when the file exists, so check out the repository first to use it; otherwise `@commitlint/config-conventional` is used. Never check out the head of a pull request in a `pull_request_target` workflow to read it, because a config can load code from the repository. Defaults to `.commitlintrc.yaml`."
+  commitlint_version:
+    required: false
+    description: "(Optional) The version of the `@commitlint` packages to install. Defaults to the version of `npm:@commitlint/cli` in the repository's mise config (check out the repository first), or `21.2.3` if it is not set there."
+
+outputs:
+  version:
+    value: ${{ steps.install.outputs.version }}
+    description: "The version of the `@commitlint` packages used."
+  type:
+    value: ${{ steps.lint.outputs.type }}
+    description: "The type of the title (e.g. `feat`), as parsed by commitlint."
+  scope:
+    value: ${{ steps.lint.outputs.scope }}
+    description: "The scope of the title without parentheses (e.g. `iam-role`). Empty if the title has no scope."
+  breaking:
+    value: ${{ steps.lint.outputs.breaking }}
+    description: "Whether the title marks a breaking change (e.g. `feat!: ...`), as parsed by commitlint. `true` or `false`."
+  subject:
+    value: ${{ steps.lint.outputs.subject }}
+    description: "The subject of the title after `: `."
+
+
+runs:
+  using: composite
+
+  steps:
+  # Install only mise here. The commitlint packages are installed in the next step, not every tool of the repository.
+  - name: Set up mise
+    uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+    with:
+      install: "false"
+      cache_key_prefix: mise-v1-github-pr-lint-title
+
+  - name: Install commitlint
+    id: install
+    shell: bash
+    env:
+      COMMITLINT_VERSION: ${{ inputs.commitlint_version }}
+    run: |
+      version="$COMMITLINT_VERSION"
+      if [ -z "$version" ]; then
+        version="$(mise current npm:@commitlint/cli 2>/dev/null || true)"
+      fi
+      version="${version:-21.2.3}"
+      if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "::error title=Invalid input::The commitlint version '${version}' must be an exact version such as \`21.2.3\`."
+        exit 1
+      fi
+
+      mise install \
+        "npm:@commitlint/cli@${version}" \
+        "npm:@commitlint/config-conventional@${version}" \
+        "npm:@commitlint/load@${version}" \
+        "npm:@commitlint/parse@${version}"
+
+      # Expose the packages that are imported directly in one `node_modules`, so that `NODE_PATH` can resolve them:
+      # `@commitlint/config-conventional` for `extends` in a config file anywhere, and `load`/`parse` for the parse script.
+      prefix="$RUNNER_TEMP/github-pr-lint-title"
+      mkdir -p "$prefix/node_modules/@commitlint"
+      for package in config-conventional load parse; do
+        ln -sfn "$(mise where "npm:@commitlint/${package}@${version}")/node_modules/@commitlint/${package}" "$prefix/node_modules/@commitlint/${package}"
+      done
+      {
+        echo "version=$version"
+        echo "prefix=$prefix"
+      } >> "$GITHUB_OUTPUT"
+
+  - name: Lint Pull Request Title
+    id: lint
+    shell: bash
+    env:
+      TITLE: ${{ inputs.title }}
+      CONFIG_FILE: ${{ inputs.config_file }}
+      VERSION: ${{ steps.install.outputs.version }}
+      PREFIX: ${{ steps.install.outputs.prefix }}
+    run: |
+      # Escape a value for a workflow command such as `::error::`.
+      escape() {
+        local value="${1//'%'/'%25'}"
+        value="${value//$'\r'/'%0D'}"
+        printf '%s' "${value//$'\n'/'%0A'}"
+      }
+
+      config="$CONFIG_FILE"
+      if [ -z "$config" ] || [ ! -f "$config" ]; then
+        config="$PREFIX/commitlintrc.yaml"
+        printf 'extends:\n- "@commitlint/config-conventional"\n' > "$config"
+        echo "Using \`@commitlint/config-conventional\` because \`${CONFIG_FILE}\` does not exist."
+      fi
+      export NODE_PATH="$PREFIX/node_modules"
+
+      exitcode=0
+      result="$(printf '%s\n' "$TITLE" | mise exec "npm:@commitlint/cli@${VERSION}" -- commitlint --config "$config" 2>&1)" || exitcode=$?
+      if [ -n "$result" ]; then
+        echo "$result"
+      fi
+      if [ "$exitcode" -ne 0 ]; then
+        echo "::error title=Invalid pull request title::$(escape "The title '$TITLE' does not pass commitlint ${VERSION}:"$'\n'"$result")"
+        exit 1
+      fi
+
+      # Parse the title with the same parser preset as the lint, and expose the parts as outputs.
+      cat > "$PREFIX/parse.mjs" <<'EOF'
+      import { appendFileSync } from "node:fs";
+      import { randomUUID } from "node:crypto";
+      import load from "@commitlint/load";
+      import parse from "@commitlint/parse";
+
+      const config = await load({}, { file: process.env.CONFIG });
+      const parsed = await parse(process.env.TITLE, undefined, config.parserPreset?.parserOpts);
+      const breaking = parsed.notes.some((note) => /^BREAKING[ -]CHANGE$/.test(note.title));
+      const outputs = { type: parsed.type, scope: parsed.scope, breaking: String(breaking), subject: parsed.subject };
+      for (const [key, value] of Object.entries(outputs)) {
+        const delimiter = `ghadelimiter_${randomUUID()}`;
+        appendFileSync(process.env.GITHUB_OUTPUT, `${key}<<${delimiter}\n${value ?? ""}\n${delimiter}\n`);
+      }
+      console.log(`The title passes commitlint (type: ${outputs.type}, scope: ${outputs.scope || "none"}, breaking: ${outputs.breaking}).`);
+      EOF
+      CONFIG="$config" mise exec "npm:@commitlint/cli@${VERSION}" -- node "$PREFIX/parse.mjs"
