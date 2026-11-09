@@ -8,7 +8,7 @@ configuration files.
 ## Requirements
 
 - Bash and AWS CLI v2 on the runner. No action-specific runtime dependencies or
-  architecture-specific binaries are installed; Linux amd64 and arm64 are tested.
+  architecture-specific binaries are installed.
 - AWS credentials configured before this action, for example with
   [`aws.configure-credentials`](../aws.configure-credentials/action.yaml).
 - `codeartifact:GetAuthorizationToken` on the domain,
@@ -109,7 +109,5 @@ Run the regression tests with uv (PyYAML is a test-only dependency):
 uv run .github/actions/aws.codeartifact.configure-credentials/tests/test_action.py
 ```
 
-The tests execute the actual inline shell step with a mocked AWS CLI. CI also
-invokes the composite action and verifies its outputs and subsequent-step
-environment on Linux amd64 and arm64. These tests need no AWS credentials and do
-not prove access to a live CodeArtifact repository.
+The tests execute the actual inline shell step with a mocked AWS CLI. These tests
+need no AWS credentials and do not prove access to a live CodeArtifact repository.

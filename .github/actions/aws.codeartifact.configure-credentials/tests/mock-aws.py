@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline AWS CLI fixture shared by regression and composite smoke tests."""
+"""Offline AWS CLI fixture for regression tests."""
 
 import json
 import os
