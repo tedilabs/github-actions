@@ -50,13 +50,14 @@ jobs:
       with:
         aws_region: ap-northeast-1
         domain: example
-        domain_owner: "111122223333"
+        domain_owner: "111122223333" # Optional for same-account access.
         repository: internal
         format: pypi
 ```
 
-The `domain_owner` is the account owning the domain, which may differ from the
-account of the assumed role. `format` selects an endpoint, not an access level.
+The `domain_owner` is the account owning the domain. When omitted or empty, AWS
+uses the account of the configured credentials. Specify it when the domain belongs
+to a different account. `format` selects an endpoint, not an access level.
 
 ## Inputs and outputs
 
@@ -64,7 +65,7 @@ account of the assumed role. `format` selects an endpoint, not an access level.
 | --- | --- | --- | --- |
 | `aws_region` | Yes | | AWS region of the domain. |
 | `domain` | Yes | | CodeArtifact domain name. |
-| `domain_owner` | Yes | | AWS account ID owning the domain. |
+| `domain_owner` | No | Current AWS account | AWS account ID owning the domain. Required for cross-account access. |
 | `repository` | Yes | | CodeArtifact repository name. |
 | `format` | Yes | | `pypi`, `npm`, or `maven`. |
 | `token_duration_seconds` | No | `0` | `0` or an integer from `900` through `43200`. |

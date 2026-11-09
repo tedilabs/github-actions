@@ -10,8 +10,8 @@ inputs:
     required: true
     description: "(Required) The name of the CodeArtifact domain."
   domain_owner:
-    required: true
-    description: "(Required) The AWS account ID that owns the CodeArtifact domain."
+    required: false
+    description: "(Optional) The AWS account ID that owns the CodeArtifact domain. Defaults to the account of the configured AWS credentials. Required for cross-account access."
   repository:
     required: true
     description: "(Required) The name of the CodeArtifact repository."
@@ -47,7 +47,7 @@ runs:
     run: |
       set -euo pipefail
 
-      for input in AWS_REGION DOMAIN DOMAIN_OWNER REPOSITORY FORMAT TOKEN_DURATION_SECONDS; do
+      for input in AWS_REGION DOMAIN REPOSITORY FORMAT TOKEN_DURATION_SECONDS; do
         variable="INPUT_$input"
         if [[ -z "${!variable}" ]]; then
           echo "::error::Missing required input: $input."
@@ -70,7 +70,10 @@ runs:
         exit 1
       fi
 
-      aws_args=(--region "$INPUT_AWS_REGION" --domain "$INPUT_DOMAIN" --domain-owner "$INPUT_DOMAIN_OWNER" --output text --no-cli-pager)
+      aws_args=(--region "$INPUT_AWS_REGION" --domain "$INPUT_DOMAIN" --output text --no-cli-pager)
+      if [[ -n "$INPUT_DOMAIN_OWNER" ]]; then
+        aws_args+=(--domain-owner "$INPUT_DOMAIN_OWNER")
+      fi
       token="$(aws codeartifact get-authorization-token "${aws_args[@]}" \
         --duration-seconds "$duration" --query authorizationToken)"
 

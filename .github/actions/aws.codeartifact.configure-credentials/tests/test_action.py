@@ -25,7 +25,6 @@ class ConfigureCredentialsTest(unittest.TestCase):
         values = {
             "aws_region": "ap-northeast-1",
             "domain": "example",
-            "domain_owner": "111122223333",
             "repository": "internal",
             "format": "pypi",
             "token_duration_seconds": ACTION["inputs"]["token_duration_seconds"]["default"],
@@ -39,7 +38,7 @@ class ConfigureCredentialsTest(unittest.TestCase):
             environment = {**os.environ, **mock, "PATH": f"{root}:{os.environ['PATH']}"}
             for name, expression in STEP["env"].items():
                 if expression.startswith("${{ inputs."):
-                    environment[name] = values[expression.removeprefix("${{ inputs.").removesuffix(" }}")]
+                    environment[name] = values.get(expression.removeprefix("${{ inputs.").removesuffix(" }}"), "")
                 else:
                     environment[name] = expression
             files = {name: root / name for name in ("GITHUB_ENV", "GITHUB_OUTPUT", "MOCK_AWS_CALLS")}
@@ -56,7 +55,7 @@ class ConfigureCredentialsTest(unittest.TestCase):
         for package_format in ("pypi", "npm", "maven"):
             for duration in ("0", "900", "43200"):
                 with self.subTest(format=package_format, duration=duration):
-                    result, files = self.run_action({"format": package_format, "token_duration_seconds": duration})
+                    result, files = self.run_action({"format": package_format, "token_duration_seconds": duration, "domain_owner": "111122223333"})
                     self.assertEqual(result.returncode, 0, result.stderr)
                     endpoint = f"https://example-111122223333.d.codeartifact.ap-northeast-1.amazonaws.com/{package_format}/internal/"
                     self.assertEqual(files["GITHUB_ENV"], f"CODEARTIFACT_AUTH_TOKEN=mock-codeartifact-token\nCODEARTIFACT_REPOSITORY_ENDPOINT={endpoint}\n")
@@ -64,14 +63,28 @@ class ConfigureCredentialsTest(unittest.TestCase):
                     self.assertEqual(result.stdout, "::add-mask::mock-codeartifact-token\n")
                     self.assertEqual(result.stderr, "")
                     calls = [json.loads(line) for line in files["MOCK_AWS_CALLS"].splitlines()]
-                    common = ["--region", "ap-northeast-1", "--domain", "example", "--domain-owner", "111122223333", "--output", "text", "--no-cli-pager"]
+                    common = ["--region", "ap-northeast-1", "--domain", "example", "--output", "text", "--no-cli-pager", "--domain-owner", "111122223333"]
                     self.assertEqual(calls, [
                         ["codeartifact", "get-authorization-token", *common, "--duration-seconds", duration, "--query", "authorizationToken"],
                         ["codeartifact", "get-repository-endpoint", *common, "--repository", "internal", "--format", package_format, "--query", "repositoryEndpoint"],
                     ])
 
+    def test_domain_owner_can_be_omitted_or_empty(self):
+        self.assertFalse(ACTION["inputs"]["domain_owner"]["required"])
+        for inputs in ({}, {"domain_owner": ""}):
+            with self.subTest(inputs=inputs):
+                result, files = self.run_action(inputs)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = [json.loads(line) for line in files["MOCK_AWS_CALLS"].splitlines()]
+                self.assertEqual(len(calls), 2)
+                for call in calls:
+                    self.assertNotIn("--domain-owner", call)
+                    self.assertNotIn("", call)
+                self.assertIn("CODEARTIFACT_AUTH_TOKEN=mock-codeartifact-token\n", files["GITHUB_ENV"])
+                self.assertTrue(files["GITHUB_OUTPUT"].startswith("repository_endpoint=https://"))
+
     def test_invalid_inputs_fail_before_aws_calls(self):
-        cases = [{key: ""} for key in ACTION["inputs"]]
+        cases = [{key: ""} for key in ACTION["inputs"] if key != "domain_owner"]
         cases += [{"format": "python"}]
         cases += [{"token_duration_seconds": value} for value in ("-1", "899", "43201", "0900", "1.5", "$(exit 0)", "999999999999999999999")]
         for inputs in cases:
