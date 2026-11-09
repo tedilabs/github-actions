@@ -99,6 +99,9 @@ outputs:
   cache_hit:
     value: ${{ steps.setup-mise.outputs.cache-hit }}
     description: "Whether the cache was successfully restored."
+  versions:
+    value: ${{ steps.setup-mise.outputs.versions }}
+    description: "JSON object of active, installed tool versions keyed by tool name. Each value is a list of objects with version, requested_version, install_path, and source."
 
 
 runs:
