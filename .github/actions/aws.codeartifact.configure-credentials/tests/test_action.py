@@ -52,7 +52,7 @@ class ConfigureCredentialsTest(unittest.TestCase):
         return result, contents
 
     def test_formats_export_credentials_and_forward_arguments(self):
-        for package_format in ("pypi", "npm", "maven"):
+        for package_format in ("cargo", "generic", "maven", "npm", "nuget", "pypi", "ruby", "swift"):
             for duration in ("0", "900", "43200"):
                 with self.subTest(format=package_format, duration=duration):
                     result, files = self.run_action({"format": package_format, "token_duration_seconds": duration, "domain_owner": "111122223333"})

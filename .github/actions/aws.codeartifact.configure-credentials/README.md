@@ -1,9 +1,9 @@
 # AWS - CodeArtifact Configure Credentials
 
 Fetch a CodeArtifact authorization token and a repository endpoint using the job's
-existing AWS credentials. Supports Python (`pypi`), Node.js (`npm`), and JVM
-(`maven`) package formats without choosing a package manager or modifying its
-configuration files.
+existing AWS credentials. Supports all CodeArtifact package formats (`cargo`,
+`generic`, `maven`, `npm`, `nuget`, `pypi`, `ruby`, and `swift`) without choosing a
+package manager or modifying its configuration files.
 
 ## Requirements
 
@@ -67,7 +67,7 @@ to a different account. `format` selects an endpoint, not an access level.
 | `domain` | Yes | | CodeArtifact domain name. |
 | `domain_owner` | No | Current AWS account | AWS account ID owning the domain. Required for cross-account access. |
 | `repository` | Yes | | CodeArtifact repository name. |
-| `format` | Yes | | `pypi`, `npm`, or `maven`. |
+| `format` | Yes | | `cargo`, `generic`, `maven`, `npm`, `nuget`, `pypi`, `ruby`, or `swift`. |
 | `token_duration_seconds` | No | `0` | `0` or an integer from `900` through `43200`. |
 
 The default token duration of `0` uses the remaining lifetime of the assumed-role
@@ -97,6 +97,12 @@ The caller configures its package manager with these environment variables:
 | npm / pnpm | Configure the npm endpoint as the registry and reference the token in registry-scoped authentication settings. |
 | Yarn | Configure the npm registry and authentication in the project's Yarn configuration. |
 | Maven / Gradle | Configure the Maven endpoint with username `aws` and the token as its password. |
+
+The `format` values match the [AWS GetRepositoryEndpoint API](https://docs.aws.amazon.com/cli/latest/reference/codeartifact/get-repository-endpoint.html).
+All formats use the same token and endpoint retrieval logic. Client configuration
+remains format-specific. For `generic`, the usual publishing and downloading path
+uses AWS CLI/SDK credentials directly; those API calls do not require the token
+exported by this action. See [generic package usage](https://docs.aws.amazon.com/codeartifact/latest/ug/publishing-using-generic-packages.html).
 
 The action preserves the endpoint returned by AWS, including its trailing slash.
 It does not append `/simple/` or embed credentials in URLs. Package manager

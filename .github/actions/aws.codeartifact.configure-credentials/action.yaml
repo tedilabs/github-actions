@@ -17,7 +17,7 @@ inputs:
     description: "(Required) The name of the CodeArtifact repository."
   format:
     required: true
-    description: "(Required) The package format: `pypi`, `npm`, or `maven`."
+    description: "(Required) The CodeArtifact package format: `cargo`, `generic`, `maven`, `npm`, `nuget`, `pypi`, `ruby`, or `swift`."
   token_duration_seconds:
     required: false
     default: "0"
@@ -56,8 +56,8 @@ runs:
       done
 
       case "$INPUT_FORMAT" in
-        pypi|npm|maven) ;;
-        *) echo "::error::format must be pypi, npm, or maven."; exit 1 ;;
+        cargo|generic|maven|npm|nuget|pypi|ruby|swift) ;;
+        *) echo "::error::format must be cargo, generic, maven, npm, nuget, pypi, ruby, or swift."; exit 1 ;;
       esac
 
       duration="$INPUT_TOKEN_DURATION_SECONDS"
