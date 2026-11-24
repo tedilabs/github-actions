@@ -1,0 +1,43 @@
+name: Test - Terraform Docs
+
+
+on:
+  pull_request:
+    paths:
+    - .github/actions/terraform.docs/**
+    - .github/workflows/terraform.docs.test.yaml
+    - .github/workflows/terraform.modules.integration.yaml
+  push:
+    branches:
+    - main
+    paths:
+    - .github/actions/terraform.docs/**
+    - .github/workflows/terraform.docs.test.yaml
+    - .github/workflows/terraform.modules.integration.yaml
+  workflow_dispatch: {}
+
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up tools
+      uses: tedilabs/github-actions/.github/actions/mise.setup-tools@main
+      with:
+        mise_toml: |
+          [tools]
+          node = "24"
+          terraform-docs = "0.24.0"
+
+    - name: Test
+      run: node --test .github/actions/terraform.docs/tests/docs.test.cjs

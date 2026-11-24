@@ -72,6 +72,11 @@ on:
         type: string
         required: false
         description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the module directory as usual."
+      terraform_docs_skip_if_missing_markers:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) In non-recursive mode, skip documentation checks when `README.md` contains neither `<!-- BEGIN_TF_DOCS -->` nor `<!-- END_TF_DOCS -->`. Only standard markers are recognized; leave disabled for custom templates. Ignored in recursive mode. Defaults to `false`."
       terraform_docs_args:
         type: string
         required: false
@@ -202,6 +207,7 @@ jobs:
         target_dir: ${{ matrix.path }}
         check: "true"
         config_file: ${{ inputs.terraform_docs_config_file }}
+        skip_if_missing_markers: ${{ inputs.terraform_docs_skip_if_missing_markers }}
         recursive: ${{ inputs.terraform_docs_recursive }}
         recursive_path: ${{ inputs.terraform_docs_recursive_path }}
         recursive_exclude: ${{ inputs.terraform_docs_recursive_exclude }}

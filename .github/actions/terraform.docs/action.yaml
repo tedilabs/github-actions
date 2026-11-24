@@ -15,6 +15,10 @@ inputs:
     required: false
     default: README.md
     description: "(Optional) The file that holds the generated documentation, relative to each module directory. In non-recursive mode the action is skipped when the file does not exist, matching the behavior of the `terraform_docs` pre-commit hook. Defaults to `README.md`."
+  skip_if_missing_markers:
+    required: false
+    default: "false"
+    description: "(Optional) In non-recursive mode, skip when `output_file` contains neither `<!-- BEGIN_TF_DOCS -->` nor `<!-- END_TF_DOCS -->`. A file with only one marker is still validated by `terraform-docs`. Only standard markers are recognized; leave disabled for custom templates. Ignored in recursive mode. Defaults to `false`."
   formatter:
     required: false
     default: markdown table
@@ -48,7 +52,7 @@ inputs:
 outputs:
   skipped:
     value: ${{ steps.target.outputs.skipped }}
-    description: "`true` when `target_dir` holds no Terraform files, or when `output_file` does not exist in non-recursive mode, and `terraform-docs` was not run. Empty otherwise."
+    description: "`true` when `target_dir` holds no Terraform files, or in non-recursive mode when `output_file` does not exist or has neither standard marker with `skip_if_missing_markers` enabled, and `terraform-docs` was not run. Empty otherwise."
   stdout:
     value: ${{ steps.docs.outputs.stdout }}
     description: "The STDOUT stream of the call to `terraform-docs`. Empty when skipped."
@@ -72,6 +76,7 @@ runs:
       OUTPUT_FILE: ${{ inputs.output_file }}
       CONFIG_FILE: ${{ inputs.config_file }}
       RECURSIVE: ${{ inputs.recursive }}
+      SKIP_IF_MISSING_MARKERS: ${{ inputs.skip_if_missing_markers }}
     run: |
       target_dir="${TARGET_DIR%/}"
       target_dir="${target_dir:-.}"
@@ -88,6 +93,14 @@ runs:
 
       if [ "$RECURSIVE" != "true" ] && [ ! -f "$target_dir/$OUTPUT_FILE" ]; then
         echo "::notice::Skipping terraform-docs: $target_dir/$OUTPUT_FILE does not exist."
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+        exit 0
+      fi
+
+      # Leave partial marker pairs to terraform-docs so malformed documentation still fails.
+      if [ "$RECURSIVE" != "true" ] && [ "$SKIP_IF_MISSING_MARKERS" = "true" ] &&
+        ! grep -Fq -e '<!-- BEGIN_TF_DOCS -->' -e '<!-- END_TF_DOCS -->' "$target_dir/$OUTPUT_FILE"; then
+        echo "::notice::Skipping terraform-docs: $target_dir/$OUTPUT_FILE has no standard documentation markers."
         echo "skipped=true" >> "$GITHUB_OUTPUT"
         exit 0
       fi
