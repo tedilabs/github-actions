@@ -7,6 +7,7 @@ on:
     - .github/actions/terraform.docs/**
     - .github/workflows/terraform.docs.test.yaml
     - .github/workflows/terraform.modules.integration.yaml
+    - .github/workflows/terraform.workspaces.integration.yaml
   push:
     branches:
     - main
@@ -14,6 +15,7 @@ on:
     - .github/actions/terraform.docs/**
     - .github/workflows/terraform.docs.test.yaml
     - .github/workflows/terraform.modules.integration.yaml
+    - .github/workflows/terraform.workspaces.integration.yaml
   workflow_dispatch: {}
 
 

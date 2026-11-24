@@ -19,7 +19,7 @@ to both generation and check mode.
     skip_if_missing_markers: "true"
 ```
 
-For the reusable module integration workflow, pass the corresponding boolean:
+For the reusable module or workspace integration workflow, pass the corresponding boolean:
 
 ```yaml
 with:
