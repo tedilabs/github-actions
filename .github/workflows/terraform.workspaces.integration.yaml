@@ -84,6 +84,11 @@ on:
         type: string
         required: false
         description: "(Optional) The path to the `terraform-docs` config file, relative to the repository root. When omitted, `terraform-docs` discovers `.terraform-docs.yml` from the project directory as usual."
+      terraform_docs_skip_if_missing_markers:
+        type: boolean
+        required: false
+        default: false
+        description: "(Optional) Skip documentation checks when the project `README.md` contains neither `<!-- BEGIN_TF_DOCS -->` nor `<!-- END_TF_DOCS -->`. Only standard markers are recognized; leave disabled for custom templates. Defaults to `false`."
       terraform_docs_args:
         type: string
         required: false
@@ -212,6 +217,7 @@ jobs:
         target_dir: ${{ matrix.project }}
         check: "true"
         config_file: ${{ inputs.terraform_docs_config_file }}
+        skip_if_missing_markers: ${{ inputs.terraform_docs_skip_if_missing_markers }}
         args: ${{ inputs.terraform_docs_args }}
 
     - name: Collect Results
