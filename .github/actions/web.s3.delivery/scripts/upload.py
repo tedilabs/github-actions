@@ -19,6 +19,7 @@ Behavior (CloudFront-behavior-like semantics):
 
 Environment variables (set by action.yaml):
   UPLOAD_SOURCE                  local directory with the prepared artifacts
+  UPLOAD_COMMAND                 "sync" (default) | "cp" (recursive)
   UPLOAD_DESTINATION             s3://bucket[/prefix]
   DEFAULT_UPLOAD_RULE            YAML/JSON object; fallback rule (currently `cache_control` only)
   UPLOAD_RULES                   YAML/JSON array of rules (may be empty)
@@ -27,7 +28,7 @@ Environment variables (set by action.yaml):
                                  stale keys matching these are kept (e.g. old
                                  content-hashed assets still referenced by
                                  cached HTML)
-  UPLOAD_METADATA                "k=v,k=v,..." passed to `aws s3 sync --metadata`
+  UPLOAD_METADATA                passed to the upload command's `--metadata`
 """
 
 from __future__ import annotations
@@ -58,6 +59,7 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 
 SOURCE = Path(os.environ["UPLOAD_SOURCE"]).resolve()
+UPLOAD_COMMAND = os.environ.get("UPLOAD_COMMAND", "sync").strip()
 DESTINATION = os.environ["UPLOAD_DESTINATION"].rstrip("/")
 DEFAULT_RULE_RAW = os.environ["DEFAULT_UPLOAD_RULE"].strip()
 RULES_RAW = os.environ.get("UPLOAD_RULES", "").strip() or "[]"
@@ -290,12 +292,14 @@ def upload_batches(batches) -> None:
 
         batch_dir = stage_batch(staging_root, index, rels)
         cmd = [
-            "aws", "s3", "sync",
+            "aws", "s3", UPLOAD_COMMAND,
             str(batch_dir), f"{DESTINATION}/",
             "--no-progress",
             "--cache-control", cache_control,
             "--content-type", content_type,
         ]
+        if UPLOAD_COMMAND == "cp":
+            cmd.append("--recursive")
         if METADATA:
             cmd += ["--metadata", METADATA]
         run(cmd)
@@ -395,6 +399,10 @@ def write_step_summary(rules: list[dict], default_cache_control: str, total: int
 
 
 def main() -> None:
+    if UPLOAD_COMMAND not in ("sync", "cp"):
+        sys.stderr.write("::error::upload_command must be 'sync' or 'cp'\n")
+        sys.exit(1)
+
     default_cache_control = parse_default_rule(DEFAULT_RULE_RAW)
     rules = parse_rules(RULES_RAW)
     delete_excludes = parse_delete_excludes(DELETE_EXCLUDE_RAW)
