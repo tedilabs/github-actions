@@ -119,6 +119,56 @@ YAML). The same rules in YAML block style:
 | 0 | `/widget.js` | `public, max-age=300, s-maxage=86400, must-revalidate` | Fixed URL embedded on customer sites — browser cache must stay short; edge cache handles origin load and stays invalidatable. |
 | 1 | `chunks/**` | `public, max-age=31536000, immutable` | Hash-named lazy chunks loaded by the entry script. |
 
+## Upload command
+
+`upload_command` accepts `sync` (default) or `cp`. Existing callers continue to use
+`aws s3 sync`. To opt in to `aws s3 cp --recursive`, add this input to the usage above:
+
+```yaml
+    upload_command: cp
+```
+
+Use the value `cp`, not `cp --recursive`; the action adds `--recursive` itself.
+Other values fail before any upload or stale-object deletion.
+
+| Behavior | `sync` (default) | `cp` |
+| --- | --- | --- |
+| Upload selection | AWS CLI compares existence, size and modification time | Every prepared file is uploaded, overwriting an existing key |
+| Destination listing during upload | Once per batch, including all pages under the destination prefix | None |
+| Rules, headers and metadata | Applied to files actually uploaded | Applied to every prepared file |
+| Upload order and stale-object deletion | Existing behavior | Same behavior |
+
+The action groups files by upload phase, Cache-Control and Content-Type. With many
+retained objects under the destination prefix, `sync` repeatedly lists those objects
+for each batch. `cp` avoids those upload-time listings and is useful when the build
+would upload every file anyway.
+
+### Constraints and rollout
+
+- **Deletion still lists the destination.** With `delete_stale_objects: "true"`
+  (the default), both modes perform a separate, paginated listing after all uploads.
+  `delete_exclude_patterns` filters the result, not the listing request. Required
+  listing/deletion permissions remain necessary. Turning deletion off changes stale
+  file handling and requires a separate cleanup policy.
+- **`cp` does not skip unchanged files.** It can increase PUT requests, transferred
+  bytes and, on versioned buckets, stored object versions compared with a sync that
+  skips files. Cache-Control, Content-Type and deployment metadata are rewritten on
+  every upload. The current source preparation uses `cp -R` without preserving
+  modification times, which can also cause `sync` to re-upload cached build files.
+- **This is not an atomic deployment or rollback.** Both modes upload assets before
+  HTML and `index.html`; a failed batch stops later uploads and deletion, but objects
+  already uploaded remain. Keep old hashed assets long enough for cached HTML, open
+  browser sessions and rollback. `cp` neither cleans them up nor bounds their growth.
+- **Measure in the target environment.** Avoiding repeated listings does not remove
+  source preparation, transfers, the final deletion scan or CloudFront invalidation.
+  No fixed deployment time or speedup is guaranteed. Start with staging/dev and
+  compare upload duration and object headers before broader rollout.
+- To return to the previous upload selection, set `upload_command: sync` or remove
+  the input. This changes future uploads; it does not restore overwritten objects.
+
+See the AWS CLI references for [sync](https://docs.aws.amazon.com/cli/latest/reference/s3/sync.html)
+and [cp](https://docs.aws.amazon.com/cli/latest/reference/s3/cp.html).
+
 ## Upload sequence
 
 Uploads always happen in three phases so that visitors mid-deploy never receive an HTML

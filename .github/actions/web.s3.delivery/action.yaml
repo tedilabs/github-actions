@@ -34,6 +34,10 @@ inputs:
   source:
     required: true
     description: "(Required) The local directory containing the build artifacts to be uploaded to S3."
+  upload_command:
+    required: false
+    default: sync
+    description: "(Optional) Upload with `sync` (default) or `cp` (`aws s3 cp --recursive`). `cp` uploads every prepared file without listing the destination during upload. Stale-object deletion still lists the destination when enabled."
   source_ignore:
     required: false
     default: ""
@@ -195,6 +199,7 @@ runs:
     shell: bash
     env:
       UPLOAD_SOURCE: ${{ steps.prepare-source-dir.outputs.source_dir }}
+      UPLOAD_COMMAND: ${{ inputs.upload_command }}
       UPLOAD_DESTINATION: "s3://${{ inputs.aws_s3_bucket_name }}/${{ fromJSON(steps.render-templates.outputs.interpolated).aws_s3_bucket_key_prefix }}"
       DEFAULT_UPLOAD_RULE: ${{ inputs.default_upload_rule }}
       UPLOAD_RULES: ${{ inputs.upload_rules }}
